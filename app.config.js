@@ -1,0 +1,52 @@
+export default {
+  expo: {
+    name: 'Receipt Tracker',
+    slug: 'receipt-tracker',
+    version: '1.0.0',
+    orientation: 'portrait',
+    icon: './assets/icon.png',
+    userInterfaceStyle: 'light',
+    splash: {
+      backgroundColor: '#ffffff',
+      resizeMode: 'contain',
+    },
+    assetBundlePatterns: ['**/*'],
+    ios: {
+      supportsTablet: true,
+      bundleIdentifier: 'com.receipttracker.app',
+    },
+    android: {
+      package: 'com.receipttracker.app',
+      permissions: [
+        'CAMERA',
+        'READ_EXTERNAL_STORAGE',
+        'WRITE_EXTERNAL_STORAGE',
+      ],
+    },
+    web: {
+    },
+    plugins: [
+      'expo-font',
+      [
+        'expo-image-picker',
+        {
+          photosPermission: '需要访问您的照片库来选择小票图片',
+          cameraPermission: '需要访问您的相机来拍摄小票',
+        },
+      ],
+      [
+        'expo-camera',
+        {
+          cameraPermission: '需要访问您的相机来拍摄小票',
+        },
+      ],
+    ],
+    scheme: 'receipttracker',
+    extra: {
+      supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
+      supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+      geminiApiKey: process.env.GEMINI_API_KEY,
+    },
+  },
+};
+
