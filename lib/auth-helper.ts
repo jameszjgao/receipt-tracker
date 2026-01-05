@@ -33,28 +33,24 @@ export async function createDefaultCategoriesAndAccounts(householdId: string): P
     }
   }
 
-  // 创建默认支付账户（AI识别的账户）
-  console.log('Creating default payment accounts');
+  // 创建默认支付账户（只创建 Cash）
+  console.log('Creating default payment account (Cash only)');
   const { error: paymentAccountsError } = await supabase.rpc('create_default_payment_accounts', {
     p_household_id: householdId,
   });
 
   if (paymentAccountsError) {
     console.warn('RPC创建默认支付账户失败，尝试手动创建:', paymentAccountsError);
-    // 如果RPC失败，手动创建默认支付账户
+    // 如果RPC失败，手动创建默认支付账户（只创建 Cash）
     const { error: manualPaymentAccountsError } = await supabase.from('payment_accounts').insert([
       { household_id: householdId, name: 'Cash', is_ai_recognized: true },
-      { household_id: householdId, name: 'Credit Card', is_ai_recognized: true },
-      { household_id: householdId, name: 'Debit Card', is_ai_recognized: true },
-      { household_id: householdId, name: 'Alipay', is_ai_recognized: true },
-      { household_id: householdId, name: 'WeChat Pay', is_ai_recognized: true },
     ]);
     
     if (manualPaymentAccountsError) {
       console.error('手动创建默认支付账户也失败:', manualPaymentAccountsError);
       // 不抛出错误，允许继续，用户可以稍后手动创建
     } else {
-      console.log('默认支付账户创建成功');
+      console.log('默认支付账户（Cash）创建成功');
     }
   }
 

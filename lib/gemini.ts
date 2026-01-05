@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getCategories } from './categories';
+import { getPurposes } from './purposes';
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as FileSystemNew from 'expo-file-system';
@@ -79,7 +80,24 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
     categoryNames = ['Food', 'Dining Out', 'Home', 'Transportation', 'Shopping', 'Medical', 'Education'];
   }
 
+  // 获取用户的用途列表
+  let purposeNames: string[] = [];
+  try {
+    const purposes = await getPurposes();
+    purposeNames = purposes.map(p => p.name);
+  } catch (error) {
+    console.warn('Failed to fetch purposes, using default list:', error);
+    // 如果获取失败，使用默认用途列表
+    purposeNames = ['Home', 'Gifts', 'Business'];
+  }
+
+  // 如果用途列表为空，使用默认用途
+  if (purposeNames.length === 0) {
+    purposeNames = ['Home', 'Gifts', 'Business'];
+  }
+
   const categoryList = categoryNames.join(', ');
+  const purposeList = purposeNames.join(', ');
 
   const prompt = `You are a financial expert. Please analyze the receipt in this image and extract:
 1. Store name (storeName)
@@ -94,6 +112,7 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
 7. Detailed item list (items), each item contains:
    - Name (name)
    - Category (categoryName): Automatically select one from [${categoryList}] based on item content
+   - Purpose (purpose): Select one from [${purposeList}]. DEFAULT to "Home" unless there is clear evidence indicating otherwise (e.g., explicit business expense mention, gift purchase indication). Most receipts are personal/family use, so use "Home" as the default.
    - Unit price (price, numeric type)
 8. Image quality assessment (imageQuality):
    - clarity: Image clarity score (0.0-1.0, where 1.0 is perfectly clear)
@@ -123,6 +142,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
     {
       "name": "Item Name",
       "categoryName": "Food",
+      "purpose": "Home",
       "price": 12.99
     }
   ],
@@ -250,7 +270,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
           name: item.name || 'Unknown Item',
           categoryName: item.categoryName || defaultCategory, // Use first category as default
           price: Number(item.price) || 0,
-          purpose: (item.purpose as ItemPurpose) || 'Personnel',
+          purpose: (item.purpose as ItemPurpose) || 'Home',
           isAsset: item.isAsset !== undefined ? Boolean(item.isAsset) : false,
           confidence: item.confidence !== undefined ? Number(item.confidence) : 0.8,
         })),
@@ -457,6 +477,7 @@ REQUIRED FIELDS (extract completely, do not omit any mentioned information):
    - Each item must have:
      * name: string, complete item name or description
      * categoryName: string, MUST be one from this list: [${categoryList}]
+     * purpose: string, MUST be one from this list: [${purposeList}]. Choose "Home" for personal/family use, "Business" for work/business expenses, "Gifts" for gifts given to others
      * price: number, unit price of the item (must be positive)
    - Look for item patterns:
      * Lists: "Items: Coffee $5.50, Sandwich $20.00"
@@ -505,6 +526,7 @@ Example JSON format:
     {
       "name": "Item Name",
       "categoryName": "Food",
+      "purpose": "Home",
       "price": 12.99
     }
   ],
@@ -582,6 +604,7 @@ Example JSON format:
           parsedResult.items = [{
             name: 'General Purchase',
             categoryName: categoryNames[0] || 'Shopping',
+            purpose: 'Home',
             price: parsedResult.totalAmount - (parsedResult.tax || 0),
           }];
         } else if (!Array.isArray(parsedResult.items)) {
@@ -597,8 +620,14 @@ Example JSON format:
           }];
         }
         
-        // 验证每个item的必要字段
-        parsedResult.items = parsedResult.items.filter((item: any) => {
+        // 验证每个item的必要字段，并确保有 purpose
+        parsedResult.items = parsedResult.items.map((item: any) => {
+          // 如果缺少 purpose，默认使用 "Home"
+          if (!item.purpose) {
+            item.purpose = 'Home';
+          }
+          return item;
+        }).filter((item: any) => {
           if (!item.name || item.price === undefined || !item.categoryName) {
             console.warn('Invalid item found, skipping:', item);
             return false;
@@ -612,6 +641,7 @@ Example JSON format:
           parsedResult.items = [{
             name: 'General Purchase',
             categoryName: categoryNames[0] || 'Shopping',
+            purpose: 'Home',
             price: parsedResult.totalAmount - (parsedResult.tax || 0),
           }];
         }
@@ -696,7 +726,22 @@ export async function recognizeReceiptFromAudio(audioUri: string): Promise<Gemin
     categoryNames = ['Food', 'Dining Out', 'Home', 'Transportation', 'Shopping', 'Medical', 'Education'];
   }
 
+  // 获取用户的用途列表
+  let purposeNames: string[] = [];
+  try {
+    const purposes = await getPurposes();
+    purposeNames = purposes.map(p => p.name);
+  } catch (error) {
+    console.warn('Failed to fetch purposes, using default list:', error);
+    purposeNames = ['Home', 'Gifts', 'Business'];
+  }
+
+  if (purposeNames.length === 0) {
+    purposeNames = ['Home', 'Gifts', 'Business'];
+  }
+
   const categoryList = categoryNames.join(', ');
+  const purposeList = purposeNames.join(', ');
 
   const prompt = `You are a financial expert. Please analyze the receipt information from this audio recording and extract:
 1. Store name (storeName)
@@ -711,6 +756,7 @@ export async function recognizeReceiptFromAudio(audioUri: string): Promise<Gemin
 7. Detailed item list (items), each item contains:
    - Name (name)
    - Category (categoryName): Automatically select one from [${categoryList}] based on item content
+   - Purpose (purpose): Select one from [${purposeList}]. DEFAULT to "Home" unless there is clear evidence indicating otherwise (e.g., explicit business expense mention, gift purchase indication). Most receipts are personal/family use, so use "Home" as the default.
    - Unit price (price, numeric type)
 8. Data consistency check (dataConsistency):
    - itemsSum: Sum of all item prices (calculate: sum of all items.price)
@@ -734,6 +780,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
     {
       "name": "Item Name",
       "categoryName": "Food",
+      "purpose": "Home",
       "price": 12.99
     }
   ],
@@ -805,6 +852,16 @@ Please return strictly in JSON format without any extra text. JSON format as fol
         // 验证必需字段
         if (!parsedResult.storeName || !parsedResult.date || parsedResult.totalAmount === undefined) {
           throw new Error('Missing required fields in response');
+        }
+
+        // 确保每个 item 都有 purpose 字段
+        if (parsedResult.items && Array.isArray(parsedResult.items)) {
+          parsedResult.items = parsedResult.items.map((item: any) => {
+            if (!item.purpose) {
+              item.purpose = 'Home';
+            }
+            return item;
+          });
         }
 
         // 计算itemsSum如果未提供

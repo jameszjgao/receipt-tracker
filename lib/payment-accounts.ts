@@ -217,26 +217,12 @@ export async function findOrCreatePaymentAccount(name: string, isAiRecognized: b
       }
     }
 
-    // 3. 尝试模糊匹配（包含关系）- 作为最后的匹配尝试
-      const fuzzyMatch = allAccounts.find(acc => {
-        const accNormalized = normalizeAccountName(acc.name);
-      // 检查是否包含关键信息（账户类型等）
-        return accNormalized.includes(normalizedName) || 
-               normalizedName.includes(accNormalized);
-      });
-
-      if (fuzzyMatch) {
-        return {
-          id: fuzzyMatch.id,
-          householdId: fuzzyMatch.household_id,
-          name: fuzzyMatch.name,
-          isAiRecognized: fuzzyMatch.is_ai_recognized,
-          createdAt: fuzzyMatch.created_at,
-          updatedAt: fuzzyMatch.updated_at,
-        };
-    }
-
-    // 4. 都不匹配，创建新的支付账户（包含关键区分信息）
+    // 3. 不进行模糊匹配，优先创建新账户
+    // 只有精确匹配或卡号尾号匹配时才关联已有账户
+    // 这样可以确保从小票识别出的账户名称被优先使用，而不是强制匹配到已有账户
+    
+    // 创建新的支付账户（使用小票上识别出的完整名称）
+    console.log(`Creating new payment account from receipt: "${trimmedName}"`);
     return await createPaymentAccount(trimmedName, isAiRecognized);
   } catch (error) {
     console.error('Error finding or creating payment account:', error);

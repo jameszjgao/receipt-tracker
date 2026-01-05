@@ -172,16 +172,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 创建默认支付账户的函数（新家庭创建时调用，AI识别的账户）
+-- 创建默认支付账户的函数（新家庭创建时调用，只创建 Cash）
 CREATE OR REPLACE FUNCTION create_default_payment_accounts(p_household_id UUID)
 RETURNS void AS $$
 BEGIN
   INSERT INTO payment_accounts (household_id, name, is_ai_recognized) VALUES
-    (p_household_id, 'Cash', true),
-    (p_household_id, 'Credit Card', true),
-    (p_household_id, 'Debit Card', true),
-    (p_household_id, 'Alipay', true),
-    (p_household_id, 'WeChat Pay', true)
+    (p_household_id, 'Cash', true)
   ON CONFLICT (household_id, name) DO NOTHING;
 END;
 $$ LANGUAGE plpgsql;

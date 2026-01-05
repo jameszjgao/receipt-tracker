@@ -1,16 +1,12 @@
 -- 修复 payment_accounts 表的 RLS 策略和 RPC 函数，允许新创建的家庭插入默认支付账户
 -- 在 Supabase SQL Editor 中执行此脚本
 
--- 1. 确保 RPC 函数使用 SECURITY DEFINER 来绕过 RLS
+-- 1. 确保 RPC 函数使用 SECURITY DEFINER 来绕过 RLS（只创建 Cash）
 CREATE OR REPLACE FUNCTION create_default_payment_accounts(p_household_id UUID)
 RETURNS void AS $$
 BEGIN
   INSERT INTO payment_accounts (household_id, name, is_ai_recognized) VALUES
-    (p_household_id, 'Cash', true),
-    (p_household_id, 'Credit Card', true),
-    (p_household_id, 'Debit Card', true),
-    (p_household_id, 'Alipay', true),
-    (p_household_id, 'WeChat Pay', true)
+    (p_household_id, 'Cash', true)
   ON CONFLICT (household_id, name) DO NOTHING;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
