@@ -1,7 +1,7 @@
 export default {
   expo: {
-    name: 'Receipt Tracker',
-    slug: 'receipt-tracker',
+    name: 'Snap Receipt',
+    slug: 'snap-receipt',
     version: '1.0.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
@@ -13,14 +13,29 @@ export default {
     assetBundlePatterns: ['**/*'],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: 'com.receipttracker.app',
+      bundleIdentifier: 'com.snapreceipt.app',
+      associatedDomains: ['applinks:snapreceipt.app'],
     },
     android: {
-      package: 'com.receipttracker.app',
-      permissions: [
-        'CAMERA',
-        'READ_EXTERNAL_STORAGE',
-        'WRITE_EXTERNAL_STORAGE',
+      package: 'com.snapreceipt.app',
+      versionCode: 1,
+      permissions: ['CAMERA'],
+      intentFilters: [
+        {
+          action: 'VIEW',
+          autoVerify: true,
+          data: [
+            {
+              scheme: 'https',
+              host: 'snapreceipt.app',
+              pathPrefix: '/',
+            },
+            {
+              scheme: 'snapreceipt',
+            },
+          ],
+          category: ['BROWSABLE', 'DEFAULT'],
+        },
       ],
     },
     web: {
@@ -30,18 +45,18 @@ export default {
       [
         'expo-image-picker',
         {
-          photosPermission: '需要访问您的照片库来选择小票图片',
-          cameraPermission: '需要访问您的相机来拍摄小票',
+          photosPermission: 'Snap Receipt needs access to your photo library to select receipt images.',
+          cameraPermission: 'Snap Receipt needs access to your camera to capture receipts.',
         },
       ],
       [
         'expo-camera',
         {
-          cameraPermission: '需要访问您的相机来拍摄小票',
+          cameraPermission: 'Snap Receipt needs access to your camera to capture receipts.',
         },
       ],
     ],
-    scheme: 'receipttracker',
+    scheme: 'snapreceipt',
     extra: {
       supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
       supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,

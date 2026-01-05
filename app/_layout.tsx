@@ -60,6 +60,19 @@ export default function RootLayout() {
           }} 
         />
         <Stack.Screen 
+          name="management" 
+          options={{ 
+            title: 'Management',
+            headerBackTitle: 'Home'
+          }} 
+        />
+        <Stack.Screen 
+          name="household-manage" 
+          options={{ 
+            title: 'Household Information'
+          }} 
+        />
+        <Stack.Screen 
           name="voice-input" 
           options={{ 
             title: 'Chat to Log',
@@ -71,6 +84,30 @@ export default function RootLayout() {
           options={{ 
             title: 'Add Receipt',
             presentation: 'modal'
+          }} 
+        />
+        <Stack.Screen 
+          name="household-select" 
+          options={{ 
+            headerShown: false
+          }} 
+        />
+        <Stack.Screen 
+          name="household-members" 
+          options={{ 
+            title: 'Household Members'
+          }} 
+        />
+        <Stack.Screen 
+          name="profile" 
+          options={{ 
+            title: 'Personal Information'
+          }} 
+        />
+        <Stack.Screen 
+          name="auth/confirm" 
+          options={{ 
+            headerShown: false
           }} 
         />
       </Stack>

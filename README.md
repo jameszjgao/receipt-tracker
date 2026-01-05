@@ -1,4 +1,4 @@
-# 家庭记账软件 - Receipt Tracker
+# Snap Receipt
 
 一个基于 React Native + Expo 的家庭记账应用，支持拍摄消费小票，使用 Gemini AI 识别并整理成明细，存储到 Supabase 数据库。
 
@@ -109,7 +109,7 @@ yarn start
 ## 项目结构
 
 ```
-receipt-tracker/
+snap-receipt/
 ├── app/                    # Expo Router 页面
 │   ├── _layout.tsx        # 根布局
 │   ├── index.tsx          # 首页（拍照入口）

@@ -84,7 +84,7 @@ export default function ReceiptsScreen() {
           }
           refreshTimeout = setTimeout(() => {
             console.log('Refreshing receipts list due to database changes');
-            loadReceipts();
+    loadReceipts();
           }, 300); // 300ms 防抖延迟
         };
 
@@ -230,12 +230,12 @@ export default function ReceiptsScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            try {
+              try {
               await deleteReceipt(receiptId);
-              loadReceipts();
-            } catch (error) {
+                loadReceipts();
+              } catch (error) {
               Alert.alert('Error', 'Failed to delete receipt');
-            }
+              }
           },
         },
       ]
@@ -362,10 +362,10 @@ export default function ReceiptsScreen() {
                 onPress={() => setSelectedIds(new Set())}
               >
                 <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
+          </TouchableOpacity>
               <View style={styles.selectedCountContainer}>
                 <Text style={styles.selectedCountText}>{selectedIds.size} selected</Text>
-              </View>
+        </View>
               <TouchableOpacity 
                 style={styles.deleteButton}
                 onPress={handleBatchDelete}
@@ -376,10 +376,10 @@ export default function ReceiptsScreen() {
             </>
           ) : (
             <>
-              <TouchableOpacity style={styles.filterButton}>
-                <Text style={styles.filterText}>Filter</Text>
-                <Ionicons name="chevron-down" size={16} color="#636E72" />
-              </TouchableOpacity>
+          <TouchableOpacity style={styles.filterButton}>
+            <Text style={styles.filterText}>Filter</Text>
+            <Ionicons name="chevron-down" size={16} color="#636E72" />
+          </TouchableOpacity>
               <View style={styles.searchContainer}>
                 <Ionicons name="search" size={18} color="#636E72" style={styles.searchIcon} />
                 <TextInput
@@ -416,7 +416,7 @@ export default function ReceiptsScreen() {
               onDelete={() => item.id && handleDeleteSingle(item.id)}
               disabled={isSelectionMode}
             >
-              <TouchableOpacity
+          <TouchableOpacity
                 style={[
                   styles.receiptItem,
                   isSelected && styles.receiptItemSelected,
@@ -447,30 +447,30 @@ export default function ReceiptsScreen() {
                     </View>
                   </View>
                 )}
-                <View style={styles.receiptContent}>
+            <View style={styles.receiptContent}>
                   <View style={styles.firstRow}>
-                    <Text style={styles.storeName} numberOfLines={1}>
-                      {item.storeName}
-                    </Text>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        { backgroundColor: statusColors[item.status] },
-                      ]}
-                    >
-                      <Text style={styles.statusText}>
-                        {statusLabels[item.status]}
-                      </Text>
-                    </View>
+              <Text style={styles.storeName} numberOfLines={1}>
+                {item.storeName}
+              </Text>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    { backgroundColor: statusColors[item.status] },
+                  ]}
+                >
+                  <Text style={styles.statusText}>
+                    {statusLabels[item.status]}
+                  </Text>
+                </View>
                   </View>
                   <View style={styles.secondRow}>
                     <Text style={styles.amount}>${item.totalAmount.toFixed(2)}</Text>
                     <Text style={styles.date}>{formatDate(item.date)}</Text>
                     <Text style={styles.createdDate}>
                       {item.createdAt ? formatTimeAgo(item.createdAt) : formatDate(item.date)}
-                    </Text>
-                  </View>
-                </View>
+                </Text>
+              </View>
+            </View>
               </TouchableOpacity>
             </SwipeableRow>
           );

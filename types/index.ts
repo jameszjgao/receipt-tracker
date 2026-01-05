@@ -61,7 +61,18 @@ export interface Receipt {
 export interface User {
   id: string;
   email: string;
+  name?: string; // 用户自定义名字
+  householdId: string; // 保留向后兼容，但优先使用 currentHouseholdId
+  currentHouseholdId?: string; // 当前活动的家庭ID
+  createdAt?: string;
+}
+
+// 用户-家庭关联
+export interface UserHousehold {
+  id: string;
+  userId: string;
   householdId: string;
+  household?: Household; // 关联的家庭信息
   createdAt?: string;
 }
 
@@ -69,6 +80,7 @@ export interface User {
 export interface Household {
   id: string;
   name: string;
+  address?: string;
   createdAt?: string;
   updatedAt?: string;
 }

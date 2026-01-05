@@ -8,7 +8,7 @@ interface SwipeableRowProps {
   disabled?: boolean;
 }
 
-export function SwipeableRow({ children, onDelete, disabled = false }: SwipeableRowProps) {
+function SwipeableRow({ children, onDelete, disabled = false }: SwipeableRowProps) {
   const translateX = useRef(new Animated.Value(0)).current;
   const panStartX = useRef(0);
 
@@ -128,4 +128,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
 });
+
+export default SwipeableRow;
+export { SwipeableRow };
 

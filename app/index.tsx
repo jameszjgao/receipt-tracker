@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { isAuthenticated } from '@/lib/auth';
+import { isAuthenticated, getCurrentUser, getCurrentHousehold } from '@/lib/auth';
+import { Household } from '@/types';
 
 export default function HomeScreen() {
   const router = useRouter();
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
+  const [currentHousehold, setCurrentHousehold] = useState<Household | null>(null);
 
   useEffect(() => {
     checkAuth();
@@ -15,9 +17,69 @@ export default function HomeScreen() {
 
   const checkAuth = async () => {
     const authenticated = await isAuthenticated();
-    setIsLoggedIn(authenticated);
     if (!authenticated) {
       router.replace('/login');
+      return;
+    }
+
+    // 检查用户是否有当前家庭
+    const user = await getCurrentUser();
+    if (!user) {
+      router.replace('/household-select');
+      return;
+    }
+
+    // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用
+    // 这样可以快速登录，使用上次登录的家庭
+    if (user.currentHouseholdId || user.householdId) {
+      setIsLoggedIn(true);
+      return;
+    }
+
+    // 没有当前家庭，检查家庭数量
+    const { getUserHouseholds } = await import('@/lib/auth');
+    const households = await getUserHouseholds();
+    
+    if (households.length === 0) {
+      // 没有家庭，跳转到家庭选择页面（可以创建）
+      router.replace('/household-select');
+      return;
+    } else if (households.length === 1) {
+      // 只有一个家庭，自动设置并进入
+      const { setCurrentHousehold } = await import('@/lib/auth');
+      await setCurrentHousehold(households[0].householdId);
+      setIsLoggedIn(true);
+      return;
+    } else {
+      // 多个家庭但没有当前家庭，自动选择第一个家庭（最近加入的）
+      // 这样可以快速登录，而不需要用户选择
+      const { setCurrentHousehold } = await import('@/lib/auth');
+      await setCurrentHousehold(households[0].householdId);
+      setIsLoggedIn(true);
+      return;
+    }
+  };
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      loadHousehold();
+    }
+  }, [isLoggedIn]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) {
+        loadHousehold();
+      }
+    }, [isLoggedIn])
+  );
+
+  const loadHousehold = async () => {
+    try {
+      const household = await getCurrentHousehold();
+      setCurrentHousehold(household);
+    } catch (error) {
+      console.error('Error loading household:', error);
     }
   };
 
@@ -40,9 +102,24 @@ export default function HomeScreen() {
     <View style={styles.container}>
       <StatusBar style="dark" />
       
+      {/* 顶部栏：家庭名称和管理入口 */}
+      <View style={styles.topBar}>
+        <View style={styles.topBarLeft} />
+        <Text style={styles.householdName} numberOfLines={1}>
+          {currentHousehold?.name || 'Loading...'}
+        </Text>
+        <TouchableOpacity
+          style={styles.managementButton}
+          onPress={() => router.push('/management')}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="settings-outline" size={24} color="#2D3436" />
+        </TouchableOpacity>
+      </View>
+      
       <View style={styles.content}>
         <Text style={styles.title}>📸 Snap a receipt,</Text>
-        <Text style={styles.subtitle}>organize everything</Text>
+        <Text style={styles.subtitle}>Organize everything</Text>
         
         <TouchableOpacity 
           style={styles.iconContainer}
@@ -70,7 +147,7 @@ export default function HomeScreen() {
         onPress={() => router.push('/receipts')}
       >
         <Ionicons name="list-outline" size={20} color="#6C5CE7" style={styles.buttonIcon} />
-        <Text style={styles.secondaryButtonText}>View My Receipts</Text>
+        <Text style={styles.secondaryButtonText}>View Receipts List</Text>
       </TouchableOpacity>
     </View>
   );
@@ -84,10 +161,29 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 40,
   },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    position: 'relative',
+  },
+  topBarLeft: {
+    width: 44,
+  },
+  householdName: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2D3436',
+    textAlign: 'center',
+    paddingHorizontal: 16,
+  },
   content: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     alignItems: 'center',
+    paddingTop: 20,
   },
   title: {
     fontSize: 32,
@@ -100,11 +196,11 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: 'bold',
     color: '#2D3436',
-    marginBottom: 60,
+    marginBottom: 30,
     textAlign: 'center',
   },
   iconContainer: {
-    marginTop: 40,
+    marginTop: 20,
   },
   circle: {
     width: 200,
@@ -115,7 +211,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   chatIconContainer: {
-    marginTop: 32,
+    marginTop: 24,
   },
   chatCircle: {
     width: 150,
@@ -163,6 +259,12 @@ const styles = StyleSheet.create({
     color: '#6C5CE7',
     fontSize: 16,
     fontWeight: '600',
+  },
+  managementButton: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 

@@ -295,7 +295,7 @@ export default function ReceiptDetailsScreen() {
               // 请求相机权限
               const { status } = await ImagePicker.requestCameraPermissionsAsync();
               if (status !== 'granted') {
-                Alert.alert('Permission needed', 'We need access to your camera to take photos.');
+                Alert.alert('Permission Needed', 'Snap Receipt needs access to your camera to take photos.');
                 return;
               }
 
@@ -323,7 +323,7 @@ export default function ReceiptDetailsScreen() {
               // 请求图片库权限
               const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
               if (status !== 'granted') {
-                Alert.alert('Permission needed', 'We need access to your photo library to upload images.');
+                Alert.alert('Permission Needed', 'Snap Receipt needs access to your photo library to upload images.');
                 return;
               }
 

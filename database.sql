@@ -1,4 +1,4 @@
--- 家庭记账软件数据库表结构 (SaaS 多用户架构)
+-- Snap Receipt 数据库表结构 (SaaS 多用户架构)
 -- 在 Supabase SQL Editor 中执行此脚本
 
 -- 创建 households 表（家庭账户）

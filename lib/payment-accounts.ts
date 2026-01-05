@@ -218,22 +218,22 @@ export async function findOrCreatePaymentAccount(name: string, isAiRecognized: b
     }
 
     // 3. 尝试模糊匹配（包含关系）- 作为最后的匹配尝试
-    const fuzzyMatch = allAccounts.find(acc => {
-      const accNormalized = normalizeAccountName(acc.name);
+      const fuzzyMatch = allAccounts.find(acc => {
+        const accNormalized = normalizeAccountName(acc.name);
       // 检查是否包含关键信息（账户类型等）
-      return accNormalized.includes(normalizedName) || 
-             normalizedName.includes(accNormalized);
-    });
+        return accNormalized.includes(normalizedName) || 
+               normalizedName.includes(accNormalized);
+      });
 
-    if (fuzzyMatch) {
-      return {
-        id: fuzzyMatch.id,
-        householdId: fuzzyMatch.household_id,
-        name: fuzzyMatch.name,
-        isAiRecognized: fuzzyMatch.is_ai_recognized,
-        createdAt: fuzzyMatch.created_at,
-        updatedAt: fuzzyMatch.updated_at,
-      };
+      if (fuzzyMatch) {
+        return {
+          id: fuzzyMatch.id,
+          householdId: fuzzyMatch.household_id,
+          name: fuzzyMatch.name,
+          isAiRecognized: fuzzyMatch.is_ai_recognized,
+          createdAt: fuzzyMatch.created_at,
+          updatedAt: fuzzyMatch.updated_at,
+        };
     }
 
     // 4. 都不匹配，创建新的支付账户（包含关键区分信息）
@@ -285,14 +285,14 @@ export async function mergePaymentAccount(
       const sourceAccount = accounts.find(acc => acc.id === sourceAccountId);
       if (!sourceAccount) continue;
 
-      // 更新所有使用源支付账户的小票，将它们指向目标支付账户
-      const { error: updateError } = await supabase
-        .from('receipts')
-        .update({ payment_account_id: targetAccountId })
-        .eq('payment_account_id', sourceAccountId)
-        .eq('household_id', user.householdId);
+    // 更新所有使用源支付账户的小票，将它们指向目标支付账户
+    const { error: updateError } = await supabase
+      .from('receipts')
+      .update({ payment_account_id: targetAccountId })
+      .eq('payment_account_id', sourceAccountId)
+      .eq('household_id', user.householdId);
 
-      if (updateError) throw updateError;
+    if (updateError) throw updateError;
 
       // 记录合并历史（保存源账户的原始名称）
       const { error: historyError } = await supabase
@@ -308,14 +308,14 @@ export async function mergePaymentAccount(
         // 不阻止合并操作，只记录警告
       }
 
-      // 删除源支付账户
-      const { error: deleteError } = await supabase
-        .from('payment_accounts')
-        .delete()
-        .eq('id', sourceAccountId)
-        .eq('household_id', user.householdId);
+    // 删除源支付账户
+    const { error: deleteError } = await supabase
+      .from('payment_accounts')
+      .delete()
+      .eq('id', sourceAccountId)
+      .eq('household_id', user.householdId);
 
-      if (deleteError) throw deleteError;
+    if (deleteError) throw deleteError;
     }
   } catch (error) {
     console.error('Error merging payment account:', error);

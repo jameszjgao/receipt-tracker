@@ -21,6 +21,7 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [householdName, setHouseholdName] = useState('');
+  const [userName, setUserName] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -44,23 +45,36 @@ export default function RegisterScreen() {
 
     setLoading(true);
     try {
-      const { user, error } = await signUp(email.trim(), password, householdName.trim() || undefined);
+      const { user, error } = await signUp(email.trim(), password, householdName.trim() || undefined, userName.trim() || undefined);
       setLoading(false);
 
       if (error) {
         console.error('Registration error:', error);
+        console.error('Error details:', {
+          message: error.message,
+          name: error.name,
+          status: (error as any).status,
+          details: (error as any).details,
+        });
+        
+        // 检查是否是邮件发送错误
+        const errorMessage = error.message || 'Unknown error';
+        let userMessage = errorMessage;
+        
+        if (errorMessage.includes('confirmation email') || errorMessage.includes('sending email')) {
+          userMessage = 'Failed to send confirmation email. Please check:\n\n1. SMTP configuration in Supabase Dashboard\n2. Email server settings\n3. Check Supabase Auth Logs for details\n\nSee EMAIL_SMTP_TROUBLESHOOTING.md for help.';
+        } else if (errorMessage.includes('already registered') || errorMessage.includes('email already')) {
+          userMessage = 'This email is already registered. Please sign in instead.';
+        }
+        
         Alert.alert(
           'Registration Failed', 
-          error.message + '\n\nPlease check:\n1. Email may already be in use\n2. Network connection\n3. Supabase configuration',
+          userMessage,
           [{ text: 'OK' }]
         );
       } else if (user) {
-        Alert.alert('Registration Successful', 'Welcome to Receipt Tracker!', [
-          {
-            text: 'OK',
-            onPress: () => router.replace('/'),
-          },
-        ]);
+        // 注册成功，直接进入应用（新用户只有一个家庭，会自动设置）
+        router.replace('/');
       } else {
         Alert.alert('Registration Failed', 'Unknown error, please try again');
       }
@@ -107,7 +121,7 @@ export default function RegisterScreen() {
             <Ionicons name="mail-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="Email"
+              placeholder="Email *"
               placeholderTextColor="#95A5A6"
               value={email}
               onChangeText={setEmail}
@@ -118,10 +132,23 @@ export default function RegisterScreen() {
           </View>
 
           <View style={styles.inputContainer}>
+            <Ionicons name="person-outline" size={20} color="#636E72" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Nick name"
+              placeholderTextColor="#95A5A6"
+              value={userName}
+              onChangeText={setUserName}
+              autoCapitalize="words"
+              autoComplete="name"
+            />
+          </View>
+
+          <View style={styles.inputContainer}>
             <Ionicons name="home-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="Household Name (Optional)"
+              placeholder="Name your Household"
               placeholderTextColor="#95A5A6"
               value={householdName}
               onChangeText={setHouseholdName}
@@ -132,7 +159,7 @@ export default function RegisterScreen() {
             <Ionicons name="lock-closed-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="Password (at least 6 characters)"
+              placeholder="Password *"
               placeholderTextColor="#95A5A6"
               value={password}
               onChangeText={setPassword}
@@ -156,7 +183,7 @@ export default function RegisterScreen() {
             <Ionicons name="lock-closed-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="Confirm Password"
+              placeholder="Confirm Password *"
               placeholderTextColor="#95A5A6"
               value={confirmPassword}
               onChangeText={setConfirmPassword}
@@ -218,7 +245,7 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 24,
   },
   backButton: {
     position: 'absolute',
@@ -251,6 +278,7 @@ const styles = StyleSheet.create({
   },
   form: {
     flex: 1,
+    paddingBottom: 20,
   },
   inputContainer: {
     flexDirection: 'row',
@@ -258,10 +286,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 16,
-    marginBottom: 16,
+    paddingVertical: 14,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: '#E9ECEF',
+    minHeight: 52,
   },
   inputIcon: {
     marginRight: 12,
@@ -270,6 +299,8 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     color: '#2D3436',
+    paddingVertical: 0,
+    minHeight: 24,
   },
   eyeIcon: {
     padding: 4,
@@ -277,11 +308,12 @@ const styles = StyleSheet.create({
   button: {
     backgroundColor: '#6C5CE7',
     borderRadius: 12,
-    paddingVertical: 16,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 8,
-    marginBottom: 24,
+    marginTop: 4,
+    marginBottom: 20,
+    minHeight: 52,
     shadowColor: '#6C5CE7',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,

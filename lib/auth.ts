@@ -1,5 +1,7 @@
 import { supabase } from './supabase';
-import { User, Household } from '@/types';
+import { User, Household, UserHousehold } from '@/types';
+import { createDefaultCategoriesAndAccounts } from './auth-helper';
+import Constants from 'expo-constants';
 
 // 获取当前用户
 export async function getCurrentUser(): Promise<User | null> {
@@ -16,10 +18,15 @@ export async function getCurrentUser(): Promise<User | null> {
     if (error) throw error;
     if (!data) return null;
 
+    // 优先使用 current_household_id，如果没有则使用 household_id（向后兼容）
+    const currentHouseholdId = data.current_household_id || data.household_id;
+
     return {
       id: data.id,
       email: data.email,
-      householdId: data.household_id,
+      name: data.name,
+      householdId: currentHouseholdId, // 返回当前活动的家庭ID（优先使用 currentHouseholdId）
+      currentHouseholdId: data.current_household_id,
       createdAt: data.created_at,
     };
   } catch (error) {
@@ -34,10 +41,14 @@ export async function getCurrentHousehold(): Promise<Household | null> {
     const user = await getCurrentUser();
     if (!user) return null;
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) return null;
+
     const { data, error } = await supabase
       .from('households')
       .select('*')
-      .eq('id', user.householdId)
+      .eq('id', householdId)
       .single();
 
     if (error) throw error;
@@ -46,6 +57,7 @@ export async function getCurrentHousehold(): Promise<Household | null> {
     return {
       id: data.id,
       name: data.name,
+      address: data.address,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
     };
@@ -55,16 +67,172 @@ export async function getCurrentHousehold(): Promise<Household | null> {
   }
 }
 
+// 获取用户的所有家庭列表
+export async function getUserHouseholds(): Promise<UserHousehold[]> {
+  try {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) return [];
+
+    const { data, error } = await supabase
+      .from('user_households')
+      .select(`
+        *,
+        households (*)
+      `)
+      .eq('user_id', authUser.id)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    if (!data) return [];
+
+    return data.map((row: any) => ({
+      id: row.id,
+      userId: row.user_id,
+      householdId: row.household_id,
+      household: row.households ? {
+        id: row.households.id,
+        name: row.households.name,
+        address: row.households.address,
+        createdAt: row.households.created_at,
+        updatedAt: row.households.updated_at,
+      } : undefined,
+      createdAt: row.created_at,
+    }));
+  } catch (error) {
+    console.error('Error getting user households:', error);
+    return [];
+  }
+}
+
+// 设置当前活动的家庭
+export async function setCurrentHousehold(householdId: string): Promise<{ error: Error | null }> {
+  try {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) {
+      return { error: new Error('Not authenticated') };
+    }
+
+    // 验证用户是否属于该家庭
+    const { data: association, error: checkError } = await supabase
+      .from('user_households')
+      .select('id')
+      .eq('user_id', authUser.id)
+      .eq('household_id', householdId)
+      .single();
+
+    if (checkError || !association) {
+      return { error: new Error('User does not belong to this household') };
+    }
+
+    // 更新用户的当前家庭
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({ current_household_id: householdId })
+      .eq('id', authUser.id);
+
+    if (updateError) throw updateError;
+
+    return { error: null };
+  } catch (error) {
+    console.error('Error setting current household:', error);
+    return {
+      error: error instanceof Error ? error : new Error('Failed to set current household'),
+    };
+  }
+}
+
+// 创建新家庭并加入
+export async function createHousehold(name: string, address?: string): Promise<{ household: Household | null; error: Error | null }> {
+  try {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) {
+      return { household: null, error: new Error('Not authenticated') };
+    }
+
+    // 创建家庭
+    const insertData: { name: string; address?: string } = { name };
+    if (address && address.trim()) {
+      insertData.address = address.trim();
+    }
+    
+    const { data: householdData, error: householdError } = await supabase
+      .from('households')
+      .insert(insertData)
+      .select()
+      .single();
+
+    if (householdError) throw householdError;
+    if (!householdData) {
+      return { household: null, error: new Error('Failed to create household') };
+    }
+
+    // 将用户加入家庭，并设置为管理员（创建者）
+    const { error: associationError } = await supabase
+      .from('user_households')
+      .insert({
+        user_id: authUser.id,
+        household_id: householdData.id,
+        is_admin: true,
+      });
+
+    if (associationError) {
+      // 如果关联失败，尝试删除刚创建的家庭
+      await supabase.from('households').delete().eq('id', householdData.id);
+      throw associationError;
+    }
+
+    // 设置为当前家庭
+    const { error: setCurrentError } = await setCurrentHousehold(householdData.id);
+    if (setCurrentError) {
+      console.warn('Failed to set as current household:', setCurrentError);
+      // 不阻止流程，用户可以稍后手动选择
+    }
+
+    // 创建默认分类和账户
+    try {
+      await createDefaultCategoriesAndAccounts(householdData.id);
+    } catch (error) {
+      console.warn('Failed to create default categories and accounts:', error);
+      // 不阻止流程，用户可以稍后手动创建
+    }
+
+    const household: Household = {
+      id: householdData.id,
+      name: householdData.name,
+      address: householdData.address,
+      createdAt: householdData.created_at,
+      updatedAt: householdData.updated_at,
+    };
+
+    return { household, error: null };
+  } catch (error) {
+    console.error('Error creating household:', error);
+    return {
+      household: null,
+      error: error instanceof Error ? error : new Error('Failed to create household'),
+    };
+  }
+}
+
 // 注册新用户（创建家庭账户）
-export async function signUp(email: string, password: string, householdName?: string): Promise<{ user: User | null; error: Error | null }> {
+export async function signUp(email: string, password: string, householdName?: string, userName?: string): Promise<{ user: User | null; error: Error | null }> {
   try {
     // 创建认证用户
     // 注意：如果 Supabase 启用了邮箱确认，注册后需要确认邮箱才能登录
-    // 在开发环境中，可以在 Supabase Dashboard > Authentication > Settings 中禁用邮箱确认
-    // 详细步骤请参考 DISABLE_EMAIL_CONFIRMATION.md
+    // 邮箱确认后，用户会被重定向到应用的登录页面
+    // 详细配置请参考 EMAIL_CONFIRMATION_SETUP.md
+    const isDev = Constants.expoConfig?.extra?.supabaseUrl?.includes('localhost') || 
+                  process.env.NODE_ENV === 'development';
+    const redirectUrl = isDev 
+      ? 'exp://localhost:8081/--/auth/confirm' // 开发环境
+      : 'snapreceipt://auth/confirm'; // 生产环境
+    
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        emailRedirectTo: redirectUrl,
+      },
     });
 
     // 处理邮箱已存在的错误
@@ -93,30 +261,39 @@ export async function signUp(email: string, password: string, householdName?: st
     // 检查 users 表中是否已存在该用户（以防万一）
     const { data: existingUser } = await supabase
       .from('users')
-      .select('id, household_id')
+      .select('id, household_id, current_household_id, name')
       .eq('id', authData.user.id)
       .maybeSingle();
     
     if (existingUser) {
-      // 用户记录已存在，直接返回
-      console.log('User record already exists, returning existing user');
+      // 用户记录已存在，如果提供了用户名，更新用户的name字段
+      if (userName && userName.trim()) {
+        await supabase
+          .from('users')
+          .update({ name: userName.trim() })
+          .eq('id', authData.user.id);
+      }
+      const householdIdFinal = existingUser.current_household_id || existingUser.household_id;
       const user: User = {
         id: authData.user.id,
         email: email,
-        householdId: existingUser.household_id,
+        name: userName && userName.trim() ? userName.trim() : undefined,
+        householdId: householdIdFinal || '', // 返回当前活动的家庭ID，如果没有则为空
+        currentHouseholdId: existingUser.current_household_id,
       };
       return { user, error: null };
     }
 
-    // 等待一下确保会话建立（如果需要）
-    // 然后使用数据库函数创建家庭和用户记录（绕过 RLS）
-    const householdNameFinal = householdName || `${email.split('@')[0]}的家庭`;
-    console.log('Creating household and user via RPC:', householdNameFinal);
+    // 创建家庭和用户记录
+    const householdNameFinal = householdName || `${email.split('@')[0]}'s Household`;
+    const userNameFinal = userName || email.split('@')[0];
+    console.log('Creating household and user via RPC:', householdNameFinal, 'User Name:', userNameFinal);
     
     const { data: householdId, error: rpcError } = await supabase.rpc('create_user_with_household', {
       p_user_id: authData.user.id,
       p_email: email,
       p_household_name: householdNameFinal,
+      p_user_name: userNameFinal,
     });
 
     if (rpcError) {
@@ -146,12 +323,15 @@ export async function signUp(email: string, password: string, householdName?: st
         }
 
         // 创建用户记录
+        const userNameFinal = userName || email.split('@')[0];
         const { error: userError } = await supabase
           .from('users')
           .insert({
             id: authData.user.id,
             email: email,
+            name: userNameFinal,
             household_id: householdData.id,
+            current_household_id: householdData.id,
           });
 
         if (userError) {
@@ -161,56 +341,28 @@ export async function signUp(email: string, password: string, householdName?: st
         
         console.log('User and household created via direct insert');
         
-        // 使用创建的家庭数据
-        const householdDataFinal = householdData;
+        // 创建 user_households 关联记录
+        const { error: associationError } = await supabase
+          .from('user_households')
+          .insert({
+            user_id: authData.user.id,
+            household_id: householdData.id,
+          });
+
+        if (associationError) {
+          console.warn('Failed to create user_household association:', associationError);
+        }
         
         // 创建默认分类和支付账户
-        // ... (继续执行后续代码)
+        await createDefaultCategoriesAndAccounts(householdData.id);
+
         const user: User = {
           id: authData.user.id,
           email: email,
-          householdId: householdDataFinal.id,
+          name: userName && userName.trim() ? userName.trim() : undefined,
+          householdId: householdData.id,
+          currentHouseholdId: householdData.id,
         };
-
-        // 创建默认分类
-        console.log('Creating default categories');
-        const { error: categoriesError } = await supabase.rpc('create_default_categories', {
-          p_household_id: householdDataFinal.id,
-        });
-        if (categoriesError) {
-          console.warn('RPC创建默认分类失败:', categoriesError);
-          const { error: manualCategoriesError } = await supabase.from('categories').insert([
-            { household_id: householdDataFinal.id, name: '食品', color: '#FF6B6B', is_default: true },
-            { household_id: householdDataFinal.id, name: '外餐', color: '#4ECDC4', is_default: true },
-            { household_id: householdDataFinal.id, name: '居家', color: '#45B7D1', is_default: true },
-            { household_id: householdDataFinal.id, name: '交通', color: '#FFA07A', is_default: true },
-            { household_id: householdDataFinal.id, name: '购物', color: '#98D8C8', is_default: true },
-            { household_id: householdDataFinal.id, name: '医疗', color: '#F7DC6F', is_default: true },
-            { household_id: householdDataFinal.id, name: '教育', color: '#BB8FCE', is_default: true },
-          ]);
-          if (!manualCategoriesError) {
-            console.log('默认分类创建成功');
-          }
-        }
-
-        // 创建默认支付账户
-        console.log('Creating default payment accounts');
-        const { error: paymentAccountsError } = await supabase.rpc('create_default_payment_accounts', {
-          p_household_id: householdDataFinal.id,
-        });
-        if (paymentAccountsError) {
-          console.warn('RPC创建默认支付账户失败:', paymentAccountsError);
-          const { error: manualPaymentAccountsError } = await supabase.from('payment_accounts').insert([
-            { household_id: householdDataFinal.id, name: 'Cash', is_ai_recognized: true },
-            { household_id: householdDataFinal.id, name: 'Credit Card', is_ai_recognized: true },
-            { household_id: householdDataFinal.id, name: 'Debit Card', is_ai_recognized: true },
-            { household_id: householdDataFinal.id, name: 'Alipay', is_ai_recognized: true },
-            { household_id: householdDataFinal.id, name: 'WeChat Pay', is_ai_recognized: true },
-          ]);
-          if (!manualPaymentAccountsError) {
-            console.log('默认支付账户创建成功');
-          }
-        }
 
         return { user, error: null };
       }
@@ -219,67 +371,54 @@ export async function signUp(email: string, password: string, householdName?: st
     }
 
     if (!householdId) {
-      throw new Error('注册失败：未创建家庭账户');
+      throw new Error('Registration failed: Household account not created');
     }
 
     console.log('User and household created via RPC, household ID:', householdId);
 
-    // 创建默认分类
-    console.log('Creating default categories');
-    const { error: categoriesError } = await supabase.rpc('create_default_categories', {
-      p_household_id: householdId,
-    });
+    // 创建默认分类和支付账户
+    await createDefaultCategoriesAndAccounts(householdId);
 
-    if (categoriesError) {
-      console.warn('RPC创建默认分类失败，尝试手动创建:', categoriesError);
-      // 如果RPC失败，手动创建默认分类
-      const { error: manualCategoriesError } = await supabase.from('categories').insert([
-        { household_id: householdId, name: '食品', color: '#FF6B6B', is_default: true },
-        { household_id: householdId, name: '外餐', color: '#4ECDC4', is_default: true },
-        { household_id: householdId, name: '居家', color: '#45B7D1', is_default: true },
-        { household_id: householdId, name: '交通', color: '#FFA07A', is_default: true },
-        { household_id: householdId, name: '购物', color: '#98D8C8', is_default: true },
-        { household_id: householdId, name: '医疗', color: '#F7DC6F', is_default: true },
-        { household_id: householdId, name: '教育', color: '#BB8FCE', is_default: true },
-      ]);
+    // 创建 user_households 关联记录（如果不存在）
+    // 注意：RPC 函数应该已经创建了这个记录，但为了保险起见，我们在这里也创建
+    const { error: associationError } = await supabase
+      .from('user_households')
+      .insert({
+        user_id: authData.user.id,
+        household_id: householdId,
+        is_admin: true, // Creator is admin
+      })
+      .select();
       
-      if (manualCategoriesError) {
-        console.error('手动创建默认分类也失败:', manualCategoriesError);
-        // 不抛出错误，允许继续，用户可以稍后手动创建
-      } else {
-        console.log('默认分类创建成功');
+    if (associationError) {
+      // 如果记录已存在（由 RPC 创建），这是正常的，不需要报错
+      if (!associationError.message?.includes('duplicate') && !associationError.code?.includes('23505')) {
+        console.warn('Failed to create user_household association:', associationError);
       }
     }
 
-    // 创建默认支付账户（AI识别的账户）
-    console.log('Creating default payment accounts');
-    const { error: paymentAccountsError } = await supabase.rpc('create_default_payment_accounts', {
-      p_household_id: householdId,
-    });
+    // 设置当前家庭和用户名
+    const updateData: { current_household_id: string; name?: string } = {
+      current_household_id: householdId,
+    };
+    if (userName && userName.trim()) {
+      updateData.name = userName.trim();
+    }
+    const { error: setCurrentError } = await supabase
+      .from('users')
+      .update(updateData)
+      .eq('id', authData.user.id);
 
-    if (paymentAccountsError) {
-      console.warn('RPC创建默认支付账户失败，尝试手动创建:', paymentAccountsError);
-      // 如果RPC失败，手动创建默认支付账户
-      const { error: manualPaymentAccountsError } = await supabase.from('payment_accounts').insert([
-        { household_id: householdId, name: 'Cash', is_ai_recognized: true },
-        { household_id: householdId, name: 'Credit Card', is_ai_recognized: true },
-        { household_id: householdId, name: 'Debit Card', is_ai_recognized: true },
-        { household_id: householdId, name: 'Alipay', is_ai_recognized: true },
-        { household_id: householdId, name: 'WeChat Pay', is_ai_recognized: true },
-      ]);
-      
-      if (manualPaymentAccountsError) {
-        console.error('手动创建默认支付账户也失败:', manualPaymentAccountsError);
-        // 不抛出错误，允许继续，用户可以稍后手动创建
-      } else {
-        console.log('默认支付账户创建成功');
-      }
+    if (setCurrentError) {
+      console.warn('Failed to set current_household_id/name:', setCurrentError);
     }
 
     const user: User = {
       id: authData.user.id,
       email: email,
+      name: userName && userName.trim() ? userName.trim() : undefined,
       householdId: householdId,
+      currentHouseholdId: householdId,
     };
 
     return { user, error: null };
