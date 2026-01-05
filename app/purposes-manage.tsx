@@ -13,12 +13,12 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  getCategories,
-  createCategory,
-  updateCategory,
-  deleteCategory,
-  Category,
-} from '@/lib/categories';
+  getPurposes,
+  createPurpose,
+  updatePurpose,
+  deletePurpose,
+  Purpose,
+} from '@/lib/purposes';
 
 // 预设颜色列表（减少数量，确保一行显示）
 const COLOR_OPTIONS = [
@@ -26,9 +26,9 @@ const COLOR_OPTIONS = [
   '#F7DC6F', '#BB8FCE', '#F1948A', '#85C1E2', '#82E0AA',
 ];
 
-export default function CategoriesManageScreen() {
+export default function PurposesManageScreen() {
   const router = useRouter();
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [purposes, setPurposes] = useState<Purpose[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -38,67 +38,67 @@ export default function CategoriesManageScreen() {
   const [newColor, setNewColor] = useState('#95A5A6');
 
   useEffect(() => {
-    loadCategories();
+    loadPurposes();
   }, []);
 
-  const loadCategories = async () => {
+  const loadPurposes = async () => {
     try {
       setLoading(true);
-      const data = await getCategories();
-      setCategories(data);
+      const data = await getPurposes();
+      setPurposes(data);
     } catch (error) {
-      console.error('Error loading categories:', error);
-      Alert.alert('Error', 'Failed to load categories');
+      console.error('Error loading purposes:', error);
+      Alert.alert('Error', 'Failed to load purposes');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAddCategory = async () => {
+  const handleAddPurpose = async () => {
     if (!newName.trim()) {
-      Alert.alert('Error', 'Please enter category name');
+      Alert.alert('Error', 'Please enter purpose name');
       return;
     }
 
     try {
-      await createCategory(newName.trim(), newColor);
-      await loadCategories();
+      await createPurpose(newName.trim(), newColor);
+      await loadPurposes();
       setNewName('');
       setNewColor('#95A5A6');
       setShowAddForm(false);
-      Alert.alert('Success', 'Category created');
+      Alert.alert('Success', 'Purpose created');
     } catch (error: any) {
-      console.error('Error creating category:', error);
-      Alert.alert('Error', error.message || 'Failed to create category');
+      console.error('Error creating purpose:', error);
+      Alert.alert('Error', error.message || 'Failed to create purpose');
     }
   };
 
-  const handleUpdateCategory = async (categoryId: string) => {
+  const handleUpdatePurpose = async (purposeId: string) => {
     if (!editName.trim()) {
-      Alert.alert('Error', 'Please enter category name');
+      Alert.alert('Error', 'Please enter purpose name');
       return;
     }
 
     try {
-      await updateCategory(categoryId, {
+      await updatePurpose(purposeId, {
         name: editName.trim(),
         color: editColor,
       });
-      await loadCategories();
+      await loadPurposes();
       setEditingId(null);
       setEditName('');
       setEditColor('#95A5A6');
-      Alert.alert('Success', 'Category updated');
+      Alert.alert('Success', 'Purpose updated');
     } catch (error: any) {
-      console.error('Error updating category:', error);
-      Alert.alert('Error', error.message || 'Failed to update category');
+      console.error('Error updating purpose:', error);
+      Alert.alert('Error', error.message || 'Failed to update purpose');
     }
   };
 
-  const handleDeleteCategory = async (category: Category) => {
+  const handleDeletePurpose = async (purpose: Purpose) => {
     Alert.alert(
-      'Delete Category',
-      `Are you sure you want to delete "${category.name}"?`,
+      'Delete Purpose',
+      `Are you sure you want to delete "${purpose.name}"?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -106,12 +106,12 @@ export default function CategoriesManageScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteCategory(category.id);
-              await loadCategories();
-              Alert.alert('Success', 'Category deleted');
+              await deletePurpose(purpose.id);
+              await loadPurposes();
+              Alert.alert('Success', 'Purpose deleted');
             } catch (error: any) {
-              console.error('Error deleting category:', error);
-              Alert.alert('Error', error.message || 'Failed to delete category');
+              console.error('Error deleting purpose:', error);
+              Alert.alert('Error', error.message || 'Failed to delete purpose');
             }
           },
         },
@@ -119,10 +119,10 @@ export default function CategoriesManageScreen() {
     );
   };
 
-  const startEdit = (category: Category) => {
-    setEditingId(category.id);
-    setEditName(category.name);
-    setEditColor(category.color);
+  const startEdit = (purpose: Purpose) => {
+    setEditingId(purpose.id);
+    setEditName(purpose.name);
+    setEditColor(purpose.color);
   };
 
   const cancelEdit = () => {
@@ -154,27 +154,27 @@ export default function CategoriesManageScreen() {
         >
           <Ionicons name="arrow-back" size={24} color="#2D3436" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Manage Categories</Text>
+        <Text style={styles.headerTitle}>Manage Purposes</Text>
         <View style={styles.headerRight} />
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        {/* Categories List */}
-        <View style={styles.categoriesList}>
-          {/* Add New Category Button */}
+        {/* Purposes List */}
+        <View style={styles.purposesList}>
+          {/* Add New Purpose Button */}
           {!showAddForm && (
             <TouchableOpacity
-              style={styles.categoryCard}
+              style={styles.purposeCard}
               onPress={() => setShowAddForm(true)}
             >
-              <View style={styles.addCategoryRow}>
+              <View style={styles.addPurposeRow}>
                 <Ionicons name="add-circle" size={20} color="#6C5CE7" />
-                <Text style={styles.addCategoryText}>Add Category</Text>
+                <Text style={styles.addPurposeText}>Add Purpose</Text>
               </View>
             </TouchableOpacity>
           )}
 
-          {/* Add Category Form */}
+          {/* Add Purpose Form */}
           {showAddForm && (
             <View style={styles.formCard}>
               {/* 第一行：名称 */}
@@ -182,7 +182,7 @@ export default function CategoriesManageScreen() {
                 style={styles.editInputInline}
                 value={newName}
                 onChangeText={setNewName}
-                placeholder="Category name"
+                placeholder="Purpose name"
                 placeholderTextColor="#95A5A6"
               />
 
@@ -220,16 +220,17 @@ export default function CategoriesManageScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.confirmButtonInline}
-                  onPress={handleAddCategory}
+                  onPress={handleAddPurpose}
                 >
                   <Text style={styles.confirmButtonTextInline}>Confirm</Text>
                 </TouchableOpacity>
               </View>
             </View>
           )}
-          {categories.map((category) => (
-            <View key={category.id} style={styles.categoryCard}>
-              {editingId === category.id ? (
+
+          {purposes.map((purpose) => (
+            <View key={purpose.id} style={styles.purposeCard}>
+              {editingId === purpose.id ? (
                 // Edit Mode - 三行显示
                 <View style={styles.editRow}>
                   {/* 第一行：名称 */}
@@ -237,7 +238,7 @@ export default function CategoriesManageScreen() {
                     style={styles.editInputInline}
                     value={editName}
                     onChangeText={setEditName}
-                    placeholder="Category name"
+                    placeholder="Purpose name"
                     placeholderTextColor="#95A5A6"
                   />
                   {/* 第二行：颜色 */}
@@ -269,7 +270,7 @@ export default function CategoriesManageScreen() {
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.confirmButtonInline}
-                      onPress={() => handleUpdateCategory(category.id)}
+                      onPress={() => handleUpdatePurpose(purpose.id)}
                     >
                       <Text style={styles.confirmButtonTextInline}>Confirm</Text>
                     </TouchableOpacity>
@@ -277,29 +278,31 @@ export default function CategoriesManageScreen() {
                 </View>
               ) : (
                 // Display Mode - 一行显示
-                <View style={styles.categoryRow}>
+                <View style={styles.purposeRow}>
                   <View
                     style={[
-                      styles.categoryIndicator,
-                      { backgroundColor: category.color },
+                      styles.purposeIndicator,
+                      { backgroundColor: purpose.color },
                     ]}
                   />
-                  <Text style={styles.categoryName} numberOfLines={1}>
-                    {category.name}
+                  <Text style={styles.purposeName} numberOfLines={1}>
+                    {purpose.name}
                   </Text>
-                  <View style={styles.categoryActions}>
+                  <View style={styles.purposeActions}>
                     <TouchableOpacity
                       style={styles.iconButton}
-                      onPress={() => startEdit(category)}
+                      onPress={() => startEdit(purpose)}
                     >
                       <Ionicons name="create-outline" size={18} color="#6C5CE7" />
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.iconButton}
-                      onPress={() => handleDeleteCategory(category)}
-                    >
-                      <Ionicons name="trash-outline" size={18} color="#E74C3C" />
-                    </TouchableOpacity>
+                    {!purpose.isDefault && (
+                      <TouchableOpacity
+                        style={styles.iconButton}
+                        onPress={() => handleDeletePurpose(purpose)}
+                      >
+                        <Ionicons name="trash-outline" size={18} color="#E74C3C" />
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
               )}
@@ -349,43 +352,37 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
   },
+  purposesList: {
+    gap: 12,
+  },
+  purposeCard: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 10,
+  },
   formCard: {
     backgroundColor: '#fff',
     borderRadius: 8,
     padding: 10,
     marginBottom: 12,
   },
-  colorOption: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
+  addPurposeRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'transparent',
+    justifyContent: 'center',
+    gap: 8,
   },
-  smallColorOption: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+  addPurposeText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#6C5CE7',
   },
-  colorOptionSelected: {
-    borderColor: '#2D3436',
-  },
-  categoriesList: {
-    gap: 12,
-  },
-  categoryCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 10,
-  },
-  categoryRow: {
+  purposeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-  categoryIndicator: {
+  purposeIndicator: {
     width: 16,
     height: 16,
     borderRadius: 8,
@@ -393,27 +390,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  categoryName: {
+  purposeName: {
     flex: 1,
     fontSize: 15,
     fontWeight: '500',
     color: '#2D3436',
   },
-  categoryActions: {
+  purposeActions: {
     flexDirection: 'row',
     gap: 8,
     alignItems: 'center',
-  },
-  addCategoryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  addCategoryText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#6C5CE7',
   },
   iconButton: {
     padding: 4,
@@ -470,6 +456,23 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#fff',
+  },
+  colorOption: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  smallColorOption: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+  },
+  colorOptionSelected: {
+    borderColor: '#2D3436',
   },
 });
 

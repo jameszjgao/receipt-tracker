@@ -1,6 +1,9 @@
 // 测试 Gemini API Key 和可用模型
 // 运行: node test-gemini-api.js
 
+// 加载 .env 文件
+require('dotenv').config();
+
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // 从环境变量获取 API Key
@@ -20,72 +23,83 @@ const genAI = new GoogleGenerativeAI(apiKey);
 
 async function testAPI() {
   try {
-    // 1. 列出所有可用的模型
-    console.log('1. 获取可用模型列表...');
-    const models = await genAI.listModels();
-    
-    console.log('\n可用的模型:');
-    const visionModels = [];
-    models.models.forEach((model, index) => {
-      console.log(`  ${index + 1}. ${model.name}`);
-      // 检查是否支持视觉（图像输入）
-      if (model.supportedGenerationMethods && 
-          model.supportedGenerationMethods.includes('generateContent')) {
-        visionModels.push(model.name);
-      }
-    });
-    
-    console.log('\n支持 generateContent 的模型（可用于图像识别）:');
-    visionModels.forEach((model, index) => {
-      console.log(`  ${index + 1}. ${model}`);
-    });
-    
-    // 2. 尝试使用常见的模型名称
-    console.log('\n2. 测试常见模型名称...');
+    // 测试常见的模型名称（使用实际的模型名称，去掉 models/ 前缀）
+    console.log('1. 测试常见模型和 API 调用...\n');
     const modelNamesToTest = [
-      'gemini-1.5-pro',
-      'gemini-1.5-pro-latest',
+      'gemini-2.5-flash',
+      'gemini-2.5-pro',
+      'gemini-2.0-flash',
       'gemini-1.5-flash',
-      'gemini-1.5-flash-latest',
+      'gemini-1.5-pro',
       'gemini-pro',
-      'gemini-pro-vision',
-      'gemini-1.0-pro',
-      'gemini-1.0-pro-vision-001',
     ];
+    
+    let workingModel = null;
     
     for (const modelName of modelNamesToTest) {
       try {
-        console.log(`\n  测试模型: ${modelName}...`);
+        console.log(`测试模型: ${modelName}...`);
         const model = genAI.getGenerativeModel({ model: modelName });
-        // 只检查模型是否可以初始化，不实际调用
-        console.log(`    ✅ 模型 ${modelName} 可用`);
+        
+        // 测试实际的 API 调用
+        const result = await model.generateContent('Say "API test successful" in one sentence');
+        const response = await result.response;
+        const text = response.text();
+        
+        console.log(`  ✅ ${modelName} - API 调用成功！`);
+        console.log(`  响应: ${text.substring(0, 80)}...\n`);
+        workingModel = modelName;
+        break; // 找到可用模型就停止
       } catch (error) {
-        console.log(`    ❌ 模型 ${modelName} 不可用: ${error.message}`);
+        const errorMsg = error.message || String(error);
+        if (errorMsg.includes('API_KEY_INVALID') || errorMsg.includes('401')) {
+          console.log(`  ❌ ${modelName} - API Key 无效或未授权`);
+          console.log(`  错误详情: ${errorMsg}`);
+          throw error; // 如果是 API Key 问题，直接抛出
+        } else if (errorMsg.includes('404') || errorMsg.includes('not found')) {
+          console.log(`  ⚠️  ${modelName} - 模型不存在 (404)`);
+          if (error.response) {
+            console.log(`  状态码: ${error.response.status}`);
+          }
+          console.log(`  尝试下一个模型...\n`);
+        } else {
+          console.log(`  ⚠️  ${modelName} - 错误: ${errorMsg.substring(0, 100)}`);
+          if (error.response) {
+            console.log(`  状态码: ${error.response.status}`);
+          }
+          console.log('');
+        }
       }
     }
     
-    // 3. 测试实际的 API 调用（使用简单的文本）
-    console.log('\n3. 测试 API 调用（文本）...');
-    try {
-      const testModel = genAI.getGenerativeModel({ model: visionModels[0] || 'gemini-pro' });
-      const result = await testModel.generateContent('Hello, say "API test successful"');
-      const response = await result.response;
-      console.log('   ✅ API 调用成功');
-      console.log('   响应:', response.text().substring(0, 100));
-    } catch (error) {
-      console.log('   ❌ API 调用失败:', error.message);
+    if (workingModel) {
+      console.log('✅ API Key 测试成功！');
+      console.log(`可用模型: ${workingModel}`);
+      console.log('\n🎉 您的 GEMINI_API_KEY 配置正确，可以正常使用！');
+    } else {
+      console.log('❌ 所有测试的模型都不可用');
+      console.log('请检查 API Key 权限和网络连接');
     }
     
   } catch (error) {
-    console.error('\n❌ 错误:', error.message);
-    console.error('\n完整错误信息:');
-    console.error(error);
+    console.error('\n❌ 测试失败:', error.message);
     
-    if (error.message.includes('API_KEY_INVALID')) {
-      console.error('\n⚠️  API Key 无效！请检查:');
+    if (error.message.includes('API_KEY_INVALID') || error.message.includes('401')) {
+      console.error('\n⚠️  API Key 无效或未授权！请检查:');
       console.error('  1. API Key 是否正确');
       console.error('  2. API Key 是否有访问 Gemini API 的权限');
       console.error('  3. API Key 是否已启用');
+      console.error('  4. 访问 https://makersuite.google.com/app/apikey 查看和管理 API Key');
+    } else if (error.message.includes('403') || error.message.includes('permission')) {
+      console.error('\n⚠️  权限不足！请检查:');
+      console.error('  1. API Key 是否有访问 Gemini API 的权限');
+      console.error('  2. 在 Google Cloud Console 中启用 Generative Language API');
+    } else if (error.message.includes('quota') || error.message.includes('429')) {
+      console.error('\n⚠️  API 配额已用完！');
+      console.error('  请检查您的 API 使用配额');
+    } else {
+      console.error('\n完整错误信息:');
+      console.error(error);
     }
   }
 }

@@ -1,6 +1,8 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getCategories } from './categories';
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystemNew from 'expo-file-system';
 import { GeminiReceiptResult, ItemPurpose } from '@/types';
 import { getAvailableImageModel } from './gemini-helper';
 
@@ -12,7 +14,7 @@ if (!apiKey) {
     fromPublicEnv: !!process.env.EXPO_PUBLIC_GEMINI_API_KEY,
     fromEnv: !!process.env.GEMINI_API_KEY,
   });
-  throw new Error('缺少 Gemini API Key。请检查 .env 文件中的 GEMINI_API_KEY 配置');
+  throw new Error('Missing Gemini API Key. Please check GEMINI_API_KEY configuration in .env file');
 }
 
 const genAI = new GoogleGenerativeAI(apiKey);
@@ -61,33 +63,82 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
   // 如果找到了可用模型，优先使用它
   const modelsToTry = availableModelCache ? [availableModelCache, ...POSSIBLE_MODELS] : POSSIBLE_MODELS;
 
-  const prompt = `你是一个财务专家。请分析这张图片中的小票，提取出：
-1. 商户名称 (storeName)
-2. 日期 (date，格式：YYYY-MM-DD)
-3. 总金额 (totalAmount，数字类型)
-4. 币种 (currency，如：CNY、USD等)
-5. 支付账户 (paymentAccount，如果有，包含卡号尾号信息)
-6. 税费 (tax，数字类型，如果没有则为0)
-7. 详细商品列表 (items)，每个商品包含：
-   - 名称 (name)
-   - 分类 (categoryName): 根据商品内容自动从[食品,外餐, 居家, 交通, 购物, 医疗, 教育]中选择一个
-   - 单价 (price，数字类型)
+  // 获取用户的分类列表
+  let categoryNames: string[] = [];
+  try {
+    const categories = await getCategories();
+    categoryNames = categories.map(cat => cat.name);
+  } catch (error) {
+    console.warn('Failed to fetch categories, using default list:', error);
+    // 如果获取失败，使用默认分类列表
+    categoryNames = ['Food', 'Dining Out', 'Home', 'Transportation', 'Shopping', 'Medical', 'Education'];
+  }
 
-请严格以 JSON 格式返回，不要有任何多余文字。JSON格式如下：
+  // 如果分类列表为空，使用默认分类
+  if (categoryNames.length === 0) {
+    categoryNames = ['Food', 'Dining Out', 'Home', 'Transportation', 'Shopping', 'Medical', 'Education'];
+  }
+
+  const categoryList = categoryNames.join(', ');
+
+  const prompt = `You are a financial expert. Please analyze the receipt in this image and extract:
+1. Store name (storeName)
+2. Date (date, format: YYYY-MM-DD)
+3. Total amount (totalAmount, numeric type)
+4. Currency (currency, such as: CNY, USD, etc.)
+5. Payment account (paymentAccountName, if available, MUST include key distinguishing information such as:
+   - Card number suffix (last 4 digits, e.g., ****1234, *1234, Last 4: 1234)
+   - Account type (Credit Card, Debit Card, Cash, etc.)
+   - Any other identifying information that helps distinguish different payment methods)
+6. Tax amount (tax, numeric type, 0 if not available)
+7. Detailed item list (items), each item contains:
+   - Name (name)
+   - Category (categoryName): Automatically select one from [${categoryList}] based on item content
+   - Unit price (price, numeric type)
+8. Image quality assessment (imageQuality):
+   - clarity: Image clarity score (0.0-1.0, where 1.0 is perfectly clear)
+   - completeness: Image completeness score (0.0-1.0, where 1.0 means all receipt content is visible)
+   - clarityComment: Brief comment on image clarity (e.g., "Clear and sharp", "Slightly blurry", "Very blurry")
+   - completenessComment: Brief comment on image completeness (e.g., "Complete receipt visible", "Partially cut off", "Missing important sections")
+9. Data consistency check (dataConsistency):
+   - itemsSum: Sum of all item prices (calculate: sum of all items.price)
+   - itemsSumMatchesTotal: Boolean indicating if itemsSum + tax (if any) equals totalAmount (within 0.01 tolerance)
+   - missingItems: Boolean indicating if there might be items not captured in the list
+   - consistencyComment: Brief comment on data consistency (e.g., "Items sum matches total", "Items sum differs from total by X", "Some items may be missing")
+10. Overall confidence (confidence): Overall recognition confidence score (0.0-1.0). Consider:
+    - Image clarity and completeness
+    - Whether all items are captured
+    - Whether item prices sum matches the total amount
+    - Lower confidence if items sum doesn't match total or if items seem incomplete
+
+Please return strictly in JSON format without any extra text. JSON format as follows:
 {
-  "storeName": "商户名称",
+  "storeName": "Store Name",
   "date": "2024-03-13",
   "totalAmount": 123.45,
   "currency": "CNY",
-  "paymentAccount": "信用卡****1234",
+  "paymentAccountName": "Credit Card ****1234",
   "tax": 5.67,
   "items": [
     {
-      "name": "商品名称",
-      "categoryName": "食品",
+      "name": "Item Name",
+      "categoryName": "Food",
       "price": 12.99
     }
-  ]
+  ],
+  "imageQuality": {
+    "clarity": 0.95,
+    "completeness": 1.0,
+    "clarityComment": "Clear and sharp",
+    "completenessComment": "Complete receipt visible"
+  },
+  "dataConsistency": {
+    "itemsSum": 123.45,
+    "itemsSumMatchesTotal": true,
+    "missingItems": false,
+    "consistencyComment": "Items sum matches total"
+  },
+  "confidence": 0.92
 }`;
 
   // 从 URL 下载图片并转换为 base64（只需要下载一次）
@@ -161,22 +212,58 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
       const parsedResult: GeminiReceiptResult = JSON.parse(jsonText);
 
       // 验证和规范化数据
+      const defaultCategory = categoryNames.length > 0 ? categoryNames[0] : 'Shopping';
+      // 兼容处理：支持 paymentAccount 和 paymentAccountName 两种字段名
+      const paymentAccountName = parsedResult.paymentAccountName || (parsedResult as any).paymentAccount || undefined;
+      
+      // 处理图片质量评价
+      const imageQuality = parsedResult.imageQuality ? {
+        clarity: parsedResult.imageQuality.clarity !== undefined ? Number(parsedResult.imageQuality.clarity) : undefined,
+        completeness: parsedResult.imageQuality.completeness !== undefined ? Number(parsedResult.imageQuality.completeness) : undefined,
+        clarityComment: parsedResult.imageQuality.clarityComment,
+        completenessComment: parsedResult.imageQuality.completenessComment,
+      } : undefined;
+      
+      // 处理数据一致性检查
+      const dataConsistency = parsedResult.dataConsistency ? {
+        itemsSum: parsedResult.dataConsistency.itemsSum !== undefined ? Number(parsedResult.dataConsistency.itemsSum) : undefined,
+        itemsSumMatchesTotal: parsedResult.dataConsistency.itemsSumMatchesTotal !== undefined ? Boolean(parsedResult.dataConsistency.itemsSumMatchesTotal) : undefined,
+        missingItems: parsedResult.dataConsistency.missingItems !== undefined ? Boolean(parsedResult.dataConsistency.missingItems) : undefined,
+        consistencyComment: parsedResult.dataConsistency.consistencyComment,
+      } : undefined;
+      
+      // 计算实际的明细金额总和（用于验证）
+      const calculatedItemsSum = parsedResult.items.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+      const totalAmount = Number(parsedResult.totalAmount) || 0;
+      const tax = parsedResult.tax !== undefined ? Number(parsedResult.tax) : 0;
+      const expectedTotal = calculatedItemsSum + tax;
+      const actualItemsSumMatches = Math.abs(expectedTotal - totalAmount) <= 0.01;
+      
       return {
-        storeName: parsedResult.storeName || '未知商户',
+        storeName: parsedResult.storeName || 'Unknown Store',
         date: parsedResult.date || new Date().toISOString().split('T')[0],
-        totalAmount: Number(parsedResult.totalAmount) || 0,
+        totalAmount: totalAmount,
         currency: parsedResult.currency || 'CNY',
-        paymentAccountName: parsedResult.paymentAccountName || undefined,
-        tax: parsedResult.tax !== undefined ? Number(parsedResult.tax) : 0,
+        paymentAccountName: paymentAccountName,
+        tax: tax,
         items: parsedResult.items.map(item => ({
-          name: item.name || '未知商品',
-          categoryName: item.categoryName || '购物', // 默认使用"购物"而不是"Other"
+          name: item.name || 'Unknown Item',
+          categoryName: item.categoryName || defaultCategory, // Use first category as default
           price: Number(item.price) || 0,
           purpose: (item.purpose as ItemPurpose) || 'Personnel',
           isAsset: item.isAsset !== undefined ? Boolean(item.isAsset) : false,
           confidence: item.confidence !== undefined ? Number(item.confidence) : 0.8,
         })),
         confidence: parsedResult.confidence !== undefined ? Number(parsedResult.confidence) : 0.8,
+        imageQuality: imageQuality,
+        dataConsistency: dataConsistency || {
+          itemsSum: calculatedItemsSum,
+          itemsSumMatchesTotal: actualItemsSumMatches,
+          missingItems: !actualItemsSumMatches && calculatedItemsSum < totalAmount,
+          consistencyComment: actualItemsSumMatches 
+            ? 'Items sum matches total' 
+            : `Items sum (${calculatedItemsSum.toFixed(2)}) differs from total (${totalAmount.toFixed(2)}) by ${Math.abs(expectedTotal - totalAmount).toFixed(2)}`,
+        },
       };
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -215,28 +302,28 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
     
     // 配额相关错误
     if (errorMsg.includes('quota') || errorMsg.includes('429') || errorMsg.includes('rate limit')) {
-      throw new Error(`API 调用配额已用完或达到限制\n原始错误: ${lastError.message}`);
+      throw new Error(`API quota exhausted or limit reached\nOriginal error: ${lastError.message}`);
     }
     
     // 权限相关错误
     if (errorMsg.includes('permission') || errorMsg.includes('403') || errorMsg.includes('forbidden')) {
-      throw new Error(`API 权限不足，请检查 API Key 权限\n原始错误: ${lastError.message}`);
+      throw new Error(`API permission insufficient, please check API Key permissions\nOriginal error: ${lastError.message}`);
     }
     
     // 模型不存在错误
     if (errorMsg.includes('not found') || errorMsg.includes('404')) {
       throw new Error(
-        `所有 Gemini 模型都不可用 (404)\n\n` +
-        `已尝试的模型: ${POSSIBLE_MODELS.join(', ')}\n\n` +
-        `可能原因：\n` +
-        `1. API Key 没有访问这些模型的权限\n` +
-        `2. API Key 可能不是最新的（需要访问 Google AI Studio 创建新的 Key）\n` +
-        `3. API 版本不匹配\n\n` +
-        `建议：\n` +
-        `1. 访问 https://makersuite.google.com/app/apikey 创建新的 API Key\n` +
-        `2. 确保 API Key 可以访问 Gemini 1.5 模型\n` +
-        `3. 检查 Google Cloud Console 中的 API 启用状态\n\n` +
-        `原始错误: ${lastError.message}`
+        `All Gemini models unavailable (404)\n\n` +
+        `Attempted models: ${POSSIBLE_MODELS.join(', ')}\n\n` +
+        `Possible causes:\n` +
+        `1. API Key does not have permission to access these models\n` +
+        `2. API Key may not be up to date (need to create new Key at Google AI Studio)\n` +
+        `3. API version mismatch\n\n` +
+        `Suggestions:\n` +
+        `1. Visit https://makersuite.google.com/app/apikey to create a new API Key\n` +
+        `2. Ensure API Key can access Gemini 1.5 models\n` +
+        `3. Check API enablement status in Google Cloud Console\n\n` +
+        `Original error: ${lastError.message}`
       );
     }
     
@@ -249,25 +336,505 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
         errorMsg.includes('failed to fetch') ||
         errorMsg.includes('generativelanguage.googleapis.com')) {
       throw new Error(
-        `网络连接失败\n\n` +
-        `重要提示：\n` +
-        `在中国大陆可能无法直接访问 Google API (googleapis.com)\n\n` +
-        `解决方案：\n` +
-        `1. 使用 VPN/代理连接到 Google API\n` +
-        `2. 使用支持 Google API 的代理服务器\n` +
-        `3. 检查防火墙/网络设置\n\n` +
-        `原始错误: ${lastError.message}`
+        `Network connection failed\n\n` +
+        `Important note:\n` +
+        `Direct access to Google API (googleapis.com) may not be available in mainland China\n\n` +
+        `Solutions:\n` +
+        `1. Use VPN/proxy to connect to Google API\n` +
+        `2. Use a proxy server that supports Google API\n` +
+        `3. Check firewall/network settings\n\n` +
+        `Original error: ${lastError.message}`
       );
     }
     
     // 其他错误
     throw new Error(
-      `识别小票失败\n\n` +
-      `错误类型: ${lastError.name}\n` +
-      `详细信息: ${lastError.message}\n\n` +
-      `请检查 API Key 配置和网络连接`
+      `Receipt recognition failed\n\n` +
+      `Error type: ${lastError.name}\n` +
+      `Details: ${lastError.message}\n\n` +
+      `Please check API Key configuration and network connection`
     );
   }
   
-  throw new Error('识别小票失败: 未知错误');
+  throw new Error('Receipt recognition failed: Unknown error');
+}
+
+// 从文字识别小票内容
+export async function recognizeReceiptFromText(text: string): Promise<GeminiReceiptResult> {
+  console.log('Starting receipt recognition with text...');
+  console.log('Text input:', text);
+
+  // 获取用户的分类列表
+  let categoryNames: string[] = [];
+  try {
+    const categories = await getCategories();
+    categoryNames = categories.map(cat => cat.name);
+  } catch (error) {
+    console.warn('Failed to fetch categories, using default list:', error);
+    categoryNames = ['Food', 'Dining Out', 'Home', 'Transportation', 'Shopping', 'Medical', 'Education'];
+  }
+
+  if (categoryNames.length === 0) {
+    categoryNames = ['Food', 'Dining Out', 'Home', 'Transportation', 'Shopping', 'Medical', 'Education'];
+  }
+
+  const categoryList = categoryNames.join(', ');
+
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1; // 1-12
+  const currentDay = now.getDate();
+  
+  const prompt = `You are a financial expert. Please carefully analyze the receipt information from this text input and extract ALL available information. Pay special attention to details about the purchase time, payment account, store name, and all items.
+
+CURRENT DATE CONTEXT:
+- Today's date: ${today}
+- Current year: ${currentYear}
+- Current month: ${currentMonth}
+- Current day: ${currentDay}
+
+REQUIRED FIELDS (extract completely, do not omit any mentioned information):
+
+1. Store name (storeName) - string, REQUIRED
+   - Extract the complete store/business name from the text
+   - Look for patterns like: "at [Store Name]", "from [Store Name]", "paid [Store Name]", "[Store Name] receipt", or explicit store mentions
+   - If the store name is mentioned, extract it completely, including any brand names, locations, or suffixes
+   - If no store name is explicitly mentioned:
+     * First, try to infer from context (e.g., "Starbucks" from "coffee at Starbucks")
+     * If inference fails and there are items mentioned, use the FIRST item's name as the store name
+     * Only use "Unknown Store" as a last resort if no items are mentioned either
+
+2. Date (date) - string, format: YYYY-MM-DD, REQUIRED - CRITICAL: Purchase dates are typically RECENT dates
+   - Extract the purchase date from the text with high priority
+   - IMPORTANT: Receipts are usually from RECENT purchases (within the past few days to weeks), NOT from years ago
+   - Recognize various date formats:
+     * Explicit dates: "March 15, 2024", "2024-03-15", "03/15/2024", "15/03/2024"
+     * Relative dates: "today" -> ${today}, "yesterday" -> previous day from ${today}, "last week" -> approximately 7 days before ${today}
+     * Month mentions: "March 15th", "15th March", "March 15" - if year not mentioned, use ${currentYear} if month/day is recent, otherwise use ${currentYear - 1} if it's a past month
+     * Year mentions: "2024-03-15", "03/15/24", "03/15/2024"
+   - YEAR INFERENCE RULES (CRITICAL):
+     * If year is explicitly mentioned, use that year
+     * If year is NOT mentioned:
+       - If the month/day combination is in the future relative to today (${today}), assume it's from LAST YEAR (${currentYear - 1})
+       - If the month/day combination is in the past relative to today (${today}), assume it's from THIS YEAR (${currentYear})
+       - For example: If today is ${today} and text says "March 15" (which is in the past), use "${currentYear}-03-15"
+       - For example: If today is ${today} and text says "December 25" (which may be in the future), use "${currentYear - 1}-12-25" if December 25 hasn't occurred yet this year
+     * For relative dates like "last week", "3 days ago", calculate from ${today}
+   - If no date is mentioned at all, use "${today}" as fallback (assume it's today's purchase)
+   - Pay attention to temporal words like "on", "at", "during", "bought on", "purchased on", "yesterday", "today", "last week", "a few days ago"
+   - REMEMBER: Most receipts are from recent purchases, so prefer dates closer to ${today} when ambiguous
+
+3. Total amount (totalAmount) - number, REQUIRED, must be positive
+   - Extract the total amount paid
+   - Look for patterns: "total", "paid", "amount", "$X", "X dollars", currency symbols
+   - Extract the final total, not subtotals
+   - Must be a positive number
+
+4. Currency (currency) - string, default to "USD" if not mentioned
+   - Extract currency from text: USD, CNY, EUR, GBP, JPY, etc.
+   - Look for currency symbols: $ (USD), ¥ (CNY/JPY), € (EUR), £ (GBP)
+   - Default to "USD" only if no currency information is present
+
+5. Tax amount (tax) - number, default to 0 if not mentioned
+   - Extract tax amount if explicitly mentioned
+   - Look for: "tax", "VAT", "GST", "sales tax", "tax amount"
+   - Default to 0 if not mentioned
+
+6. Payment account (paymentAccountName) - string, HIGHLY IMPORTANT - extract ALL available payment details
+   - Extract COMPLETE payment information when mentioned:
+     * Card type: "Credit Card", "Debit Card", "Visa", "Mastercard", "Amex", "Discover"
+     * Card number suffix: last 4 digits (e.g., "****1234", "*1234", "ending in 1234", "last 4: 1234")
+     * Full account identifier: "Credit Card ****1234", "Visa *5678", "Debit Card ending 9012"
+   - Other payment methods: "Cash", "PayPal", "Venmo", "Apple Pay", "Google Pay", "Bank Transfer", "Check"
+   - Include ALL identifying information to help distinguish different payment methods
+   - Format: Combine all payment details (e.g., "Credit Card ****1234", "Visa *5678", "Cash")
+   - If payment method is mentioned but incomplete, still include what is available
+   - If no payment information is mentioned, omit this field (do not include)
+
+7. Items (items) - array, REQUIRED, must contain at least one item
+   - Extract ALL items mentioned in the text
+   - Each item must have:
+     * name: string, complete item name or description
+     * categoryName: string, MUST be one from this list: [${categoryList}]
+     * price: number, unit price of the item (must be positive)
+   - Look for item patterns:
+     * Lists: "Items: Coffee $5.50, Sandwich $20.00"
+     * Descriptions: "bought coffee for $5.50", "a sandwich costing $20"
+     * Multiple mentions: extract each unique item
+   - If item prices are not explicitly mentioned, try to infer from context or distribute total amount
+   - If only a total is mentioned without item details, create a single item:
+     * name: "General Purchase" or infer from store/context (e.g., "Coffee Purchase" for Starbucks)
+     * categoryName: select the most appropriate category from [${categoryList}] based on store name or context
+     * price: total amount minus tax (if tax mentioned)
+
+8. Data consistency (dataConsistency) - object, required:
+   - itemsSum: number, sum of all item prices (calculate: sum of all items.price)
+   - itemsSumMatchesTotal: boolean, true if itemsSum + tax equals totalAmount (within 0.01 tolerance)
+   - missingItems: boolean, true if there might be items not captured in the list (e.g., if text says "and more" or only mentions total)
+   - consistencyComment: string, brief comment on data consistency
+
+9. Confidence (confidence) - number, 0.0-1.0, overall recognition confidence score
+   - Consider: completeness of extracted information, clarity of input text, whether all items are captured
+
+CRITICAL EXTRACTION RULES:
+- Extract information COMPLETELY - do not omit any mentioned details
+- For dates: Parse all date formats carefully and extract the actual purchase date
+- For store names: Extract the complete business name, don't abbreviate unnecessarily
+- For payment accounts: Include ALL identifying information (card type, last 4 digits, payment method)
+- For items: Extract ALL mentioned items, don't skip any
+- If the text is ambiguous, make reasonable inferences but note in confidence score
+- All prices must be positive numbers
+- All dates must be in YYYY-MM-DD format
+- Category names must exactly match one from the list: [${categoryList}]
+
+User input text:
+"${text}"
+
+CRITICAL: Return ONLY valid JSON, no markdown, no code blocks, no explanations, no extra text. The JSON must be parseable and complete.
+
+Example JSON format:
+{
+  "storeName": "Store Name",
+  "date": "${today}",
+  "totalAmount": 123.45,
+  "currency": "USD",
+  "paymentAccountName": "Credit Card ****1234",
+  "tax": 5.67,
+  "items": [
+    {
+      "name": "Item Name",
+      "categoryName": "Food",
+      "price": 12.99
+    }
+  ],
+  "dataConsistency": {
+    "itemsSum": 123.45,
+    "itemsSumMatchesTotal": true,
+    "missingItems": false,
+    "consistencyComment": "Items sum matches total"
+  },
+  "confidence": 0.92
+}`;
+
+  try {
+    // 首先尝试从 API 获取可用模型
+    let availableModel: string | null = null;
+    try {
+      availableModel = await getAvailableImageModel();
+      if (availableModel) {
+        console.log('✅ Found available model via API:', availableModel);
+      }
+    } catch (error) {
+      console.warn('⚠️  Could not fetch available models from API:', error);
+    }
+
+    // 尝试使用模型（优先使用从 API 获取的模型）
+    const modelsToTry = availableModel 
+      ? [availableModel, ...POSSIBLE_MODELS]
+      : POSSIBLE_MODELS;
+
+    let lastError: Error | null = null;
+
+    for (const modelName of modelsToTry) {
+      try {
+        console.log(`Trying model: ${modelName}`);
+        const model = genAI.getGenerativeModel({ model: modelName });
+
+        // 使用文本提示
+        const result = await model.generateContent(prompt);
+
+        const response = await result.response;
+        const textResponse = response.text();
+        console.log('Gemini response:', textResponse);
+
+        // 解析JSON响应
+        const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          throw new Error('No JSON found in response');
+        }
+
+        const parsedResult: any = JSON.parse(jsonMatch[0]);
+
+        // 如果商家名称为空或为"Unknown Store"，且有商品项，使用第一个商品名称作为商家名称
+        if ((!parsedResult.storeName || parsedResult.storeName === 'Unknown Store') && parsedResult.items && Array.isArray(parsedResult.items) && parsedResult.items.length > 0) {
+          const firstItem = parsedResult.items[0];
+          if (firstItem && firstItem.name) {
+            console.log('Store name not found, using first item name as store name:', firstItem.name);
+            parsedResult.storeName = firstItem.name;
+          }
+        }
+
+        // 验证必需字段
+        if (!parsedResult.storeName || !parsedResult.date || parsedResult.totalAmount === undefined) {
+          console.error('Missing required fields:', {
+            storeName: !!parsedResult.storeName,
+            date: !!parsedResult.date,
+            totalAmount: parsedResult.totalAmount !== undefined,
+          });
+          throw new Error('Missing required fields: storeName, date, or totalAmount');
+        }
+
+        // 确保 items 是数组且不为空
+        if (!parsedResult.items) {
+          console.warn('No items field in response, creating default item from total amount');
+          // 如果没有items，创建一个默认item
+          parsedResult.items = [{
+            name: 'General Purchase',
+            categoryName: categoryNames[0] || 'Shopping',
+            price: parsedResult.totalAmount - (parsedResult.tax || 0),
+          }];
+        } else if (!Array.isArray(parsedResult.items)) {
+          console.warn('Items field is not an array, converting to array');
+          parsedResult.items = [];
+        } else if (parsedResult.items.length === 0) {
+          console.warn('Items array is empty, creating default item from total amount');
+          // 如果items为空，创建一个默认item
+          parsedResult.items = [{
+            name: 'General Purchase',
+            categoryName: categoryNames[0] || 'Shopping',
+            price: parsedResult.totalAmount - (parsedResult.tax || 0),
+          }];
+        }
+        
+        // 验证每个item的必要字段
+        parsedResult.items = parsedResult.items.filter((item: any) => {
+          if (!item.name || item.price === undefined || !item.categoryName) {
+            console.warn('Invalid item found, skipping:', item);
+            return false;
+          }
+          return true;
+        });
+        
+        // 如果过滤后items为空，创建默认item
+        if (parsedResult.items.length === 0) {
+          console.warn('All items were invalid, creating default item');
+          parsedResult.items = [{
+            name: 'General Purchase',
+            categoryName: categoryNames[0] || 'Shopping',
+            price: parsedResult.totalAmount - (parsedResult.tax || 0),
+          }];
+        }
+        
+        console.log('Parsed result items count:', parsedResult.items.length);
+        console.log('Parsed result:', {
+          storeName: parsedResult.storeName,
+          date: parsedResult.date,
+          totalAmount: parsedResult.totalAmount,
+          itemsCount: parsedResult.items.length,
+        });
+
+        // 确保 dataConsistency 存在
+        if (!parsedResult.dataConsistency) {
+          parsedResult.dataConsistency = {};
+        }
+        
+        // 计算itemsSum如果未提供
+        if (parsedResult.items && parsedResult.items.length > 0) {
+          if (parsedResult.dataConsistency.itemsSum === undefined) {
+            parsedResult.dataConsistency.itemsSum = parsedResult.items.reduce(
+              (sum: number, item: any) => sum + (Number(item.price) || 0),
+              0
+            );
+          }
+          if (parsedResult.dataConsistency.itemsSumMatchesTotal === undefined) {
+            const itemsSum = parsedResult.dataConsistency.itemsSum;
+            const total = Number(parsedResult.totalAmount) || 0;
+            const tax = Number(parsedResult.tax) || 0;
+            parsedResult.dataConsistency.itemsSumMatchesTotal = Math.abs(itemsSum + tax - total) < 0.01;
+          }
+        } else {
+          // 如果没有items，设置默认值
+          parsedResult.dataConsistency.itemsSum = 0;
+          parsedResult.dataConsistency.itemsSumMatchesTotal = false;
+        }
+        
+        // 确保 confidence 存在
+        if (parsedResult.confidence === undefined) {
+          parsedResult.confidence = 0.8; // 默认置信度
+        }
+
+        console.log('Final parsed result:', {
+          storeName: parsedResult.storeName,
+          date: parsedResult.date,
+          totalAmount: parsedResult.totalAmount,
+          itemsCount: parsedResult.items.length,
+          items: parsedResult.items.map((item: any) => ({ name: item.name, price: item.price })),
+        });
+
+        return parsedResult as GeminiReceiptResult;
+      } catch (error) {
+        console.warn(`Model ${modelName} failed:`, error);
+        lastError = error instanceof Error ? error : new Error(String(error));
+        continue;
+      }
+    }
+
+    throw lastError || new Error('All models failed');
+  } catch (error) {
+    console.error('Error recognizing receipt from text:', error);
+    throw error;
+  }
+}
+
+// 从音频识别小票内容
+export async function recognizeReceiptFromAudio(audioUri: string): Promise<GeminiReceiptResult> {
+  console.log('Starting receipt recognition with audio...');
+  console.log('Audio URI:', audioUri);
+
+  // 获取用户的分类列表
+  let categoryNames: string[] = [];
+  try {
+    const categories = await getCategories();
+    categoryNames = categories.map(cat => cat.name);
+  } catch (error) {
+    console.warn('Failed to fetch categories, using default list:', error);
+    categoryNames = ['Food', 'Dining Out', 'Home', 'Transportation', 'Shopping', 'Medical', 'Education'];
+  }
+
+  if (categoryNames.length === 0) {
+    categoryNames = ['Food', 'Dining Out', 'Home', 'Transportation', 'Shopping', 'Medical', 'Education'];
+  }
+
+  const categoryList = categoryNames.join(', ');
+
+  const prompt = `You are a financial expert. Please analyze the receipt information from this audio recording and extract:
+1. Store name (storeName)
+2. Date (date, format: YYYY-MM-DD, use today's date if not mentioned)
+3. Total amount (totalAmount, numeric type)
+4. Currency (currency, such as: CNY, USD, etc., default to USD if not mentioned)
+5. Payment account (paymentAccountName, if available, MUST include key distinguishing information such as:
+   - Card number suffix (last 4 digits, e.g., ****1234, *1234, Last 4: 1234)
+   - Account type (Credit Card, Debit Card, Cash, etc.)
+   - Any other identifying information that helps distinguish different payment methods)
+6. Tax amount (tax, numeric type, 0 if not available)
+7. Detailed item list (items), each item contains:
+   - Name (name)
+   - Category (categoryName): Automatically select one from [${categoryList}] based on item content
+   - Unit price (price, numeric type)
+8. Data consistency check (dataConsistency):
+   - itemsSum: Sum of all item prices (calculate: sum of all items.price)
+   - itemsSumMatchesTotal: Boolean indicating if itemsSum + tax (if any) equals totalAmount (within 0.01 tolerance)
+   - missingItems: Boolean indicating if there might be items not captured in the list
+   - consistencyComment: Brief comment on data consistency
+9. Overall confidence (confidence): Overall recognition confidence score (0.0-1.0). Consider:
+    - Whether all items are captured
+    - Whether item prices sum matches the total amount
+    - Lower confidence if items sum doesn't match total or if items seem incomplete
+
+Please return strictly in JSON format without any extra text. JSON format as follows:
+{
+  "storeName": "Store Name",
+  "date": "2024-03-13",
+  "totalAmount": 123.45,
+  "currency": "USD",
+  "paymentAccountName": "Credit Card ****1234",
+  "tax": 5.67,
+  "items": [
+    {
+      "name": "Item Name",
+      "categoryName": "Food",
+      "price": 12.99
+    }
+  ],
+  "dataConsistency": {
+    "itemsSum": 123.45,
+    "itemsSumMatchesTotal": true,
+    "missingItems": false,
+    "consistencyComment": "Items sum matches total"
+  },
+  "confidence": 0.92
+}`;
+
+  try {
+    // 读取音频文件
+    // 使用 legacy API 读取音频文件（与新版本 API 兼容）
+    const audioBase64 = await FileSystem.readAsStringAsync(audioUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    // 获取音频文件的MIME类型（假设是m4a格式，Expo录音默认格式）
+    const mimeType = 'audio/m4a';
+
+    // 首先尝试从 API 获取可用模型（支持多模态的模型通常也支持音频）
+    let availableModel: string | null = null;
+    try {
+      availableModel = await getAvailableImageModel();
+      if (availableModel) {
+        console.log('✅ Found available model via API:', availableModel);
+      }
+    } catch (error) {
+      console.warn('⚠️  Could not fetch available models from API:', error);
+    }
+
+    // 尝试使用支持音频的模型（优先使用从 API 获取的模型）
+    const modelsToTry = availableModel 
+      ? [availableModel, ...POSSIBLE_MODELS]
+      : POSSIBLE_MODELS;
+
+    let lastError: Error | null = null;
+
+    for (const modelName of modelsToTry) {
+      try {
+        console.log(`Trying model: ${modelName}`);
+        const model = genAI.getGenerativeModel({ model: modelName });
+
+        // 使用音频和文本提示
+        const result = await model.generateContent([
+          {
+            inlineData: {
+              data: audioBase64,
+              mimeType: mimeType,
+            },
+          },
+          prompt,
+        ]);
+
+        const response = await result.response;
+        const text = response.text();
+        console.log('Gemini response:', text);
+
+        // 解析JSON响应
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          throw new Error('No JSON found in response');
+        }
+
+        const parsedResult: any = JSON.parse(jsonMatch[0]);
+
+        // 验证必需字段
+        if (!parsedResult.storeName || !parsedResult.date || parsedResult.totalAmount === undefined) {
+          throw new Error('Missing required fields in response');
+        }
+
+        // 计算itemsSum如果未提供
+        if (parsedResult.items && parsedResult.items.length > 0) {
+          if (parsedResult.dataConsistency?.itemsSum === undefined) {
+            parsedResult.dataConsistency = parsedResult.dataConsistency || {};
+            parsedResult.dataConsistency.itemsSum = parsedResult.items.reduce(
+              (sum: number, item: any) => sum + (item.price || 0),
+              0
+            );
+          }
+          if (parsedResult.dataConsistency?.itemsSumMatchesTotal === undefined) {
+            const itemsSum = parsedResult.dataConsistency.itemsSum;
+            const total = parsedResult.totalAmount || 0;
+            const tax = parsedResult.tax || 0;
+            parsedResult.dataConsistency.itemsSumMatchesTotal = Math.abs(itemsSum + tax - total) < 0.01;
+          }
+        }
+
+        return parsedResult as GeminiReceiptResult;
+      } catch (error) {
+        console.warn(`Model ${modelName} failed:`, error);
+        lastError = error instanceof Error ? error : new Error(String(error));
+        continue;
+      }
+    }
+
+    throw lastError || new Error('All models failed');
+  } catch (error) {
+    console.error('Error recognizing receipt from audio:', error);
+    throw error;
+  }
 }

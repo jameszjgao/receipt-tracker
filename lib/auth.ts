@@ -75,17 +75,17 @@ export async function signUp(email: string, password: string, householdName?: st
           errorMsg.includes('email already') ||
           errorMsg.includes('user already registered')) {
         throw new Error(
-          '该邮箱已被注册。\n\n' +
-          '如果这是您的账户，请直接登录。\n\n' +
-          '如果需要重新注册，请先在 Supabase Dashboard > Authentication > Users 中删除该用户，然后重新注册。\n\n' +
-          '详细步骤请参考 cleanup-auth-users.md'
+          'This email is already registered.\n\n' +
+          'If this is your account, please sign in directly.\n\n' +
+          'If you need to re-register, please delete the user in Supabase Dashboard > Authentication > Users first, then register again.\n\n' +
+          'For detailed steps, please refer to cleanup-auth-users.md'
         );
       }
       throw authError;
     }
     
     if (!authData.user) {
-      throw new Error('注册失败：未创建用户');
+      throw new Error('Registration failed: User not created');
     }
     
     console.log('Auth user created:', authData.user.id, authData.user.email);
@@ -136,13 +136,13 @@ export async function signUp(email: string, password: string, householdName?: st
         if (householdError) {
           console.error('Household creation error:', householdError);
           if (householdError.message?.includes('row-level security') || householdError.code === '42501') {
-            throw new Error('数据库权限错误：无法创建家庭账户。请先在 Supabase 中执行 create-user-function.sql 脚本');
+            throw new Error('Database permission error: Unable to create household account. Please execute create-user-function.sql script in Supabase first');
           }
-          throw new Error(`创建家庭账户失败: ${householdError.message}`);
+          throw new Error(`Failed to create household account: ${householdError.message}`);
         }
         
         if (!householdData) {
-          throw new Error('注册失败：未创建家庭账户');
+          throw new Error('Registration failed: Household account not created');
         }
 
         // 创建用户记录
@@ -156,7 +156,7 @@ export async function signUp(email: string, password: string, householdName?: st
 
         if (userError) {
           console.error('User creation error:', userError);
-          throw new Error(`创建用户记录失败: ${userError.message}`);
+          throw new Error(`Failed to create user record: ${userError.message}`);
         }
         
         console.log('User and household created via direct insert');
@@ -215,7 +215,7 @@ export async function signUp(email: string, password: string, householdName?: st
         return { user, error: null };
       }
       
-      throw new Error(`创建用户和家庭失败: ${rpcError.message}`);
+      throw new Error(`Failed to create user and household: ${rpcError.message}`);
     }
 
     if (!householdId) {
@@ -303,7 +303,7 @@ export async function signIn(email: string, password: string): Promise<{ error: 
     if (error) {
       // 提供更友好的错误消息
       if (error.message?.includes('Email not confirmed') || error.message?.includes('email_not_confirmed')) {
-        throw new Error('邮箱未确认：请先检查您的邮箱并点击确认链接。\n\n如果是在开发环境，可以在 Supabase Dashboard 中禁用邮箱确认功能。');
+        throw new Error('Email not confirmed: Please check your email and click the confirmation link.\n\nIf in development environment, you can disable email confirmation in Supabase Dashboard.');
       }
       throw error;
     }

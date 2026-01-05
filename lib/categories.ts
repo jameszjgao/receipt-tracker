@@ -6,7 +6,7 @@ import { getCurrentUser } from './auth';
 export async function getCategories(): Promise<Category[]> {
   try {
     const user = await getCurrentUser();
-    if (!user) throw new Error('未登录');
+    if (!user) throw new Error('Not logged in');
 
     const { data, error } = await supabase
       .from('categories')
@@ -36,7 +36,7 @@ export async function getCategories(): Promise<Category[]> {
 export async function createCategory(name: string, color: string = '#95A5A6'): Promise<Category> {
   try {
     const user = await getCurrentUser();
-    if (!user) throw new Error('未登录');
+    if (!user) throw new Error('Not logged in');
 
     const { data, error } = await supabase
       .from('categories')
@@ -70,7 +70,7 @@ export async function createCategory(name: string, color: string = '#95A5A6'): P
 export async function updateCategory(categoryId: string, updates: { name?: string; color?: string }): Promise<void> {
   try {
     const user = await getCurrentUser();
-    if (!user) throw new Error('未登录');
+    if (!user) throw new Error('Not logged in');
 
     const updateData: any = {};
     if (updates.name !== undefined) updateData.name = updates.name.trim();
@@ -93,7 +93,7 @@ export async function updateCategory(categoryId: string, updates: { name?: strin
 export async function deleteCategory(categoryId: string): Promise<void> {
   try {
     const user = await getCurrentUser();
-    if (!user) throw new Error('未登录');
+    if (!user) throw new Error('Not logged in');
 
     // 检查是否为默认分类
     const { data: category, error: fetchError } = await supabase
@@ -105,7 +105,7 @@ export async function deleteCategory(categoryId: string): Promise<void> {
 
     if (fetchError) throw fetchError;
     if (category?.is_default) {
-      throw new Error('不能删除默认分类');
+      throw new Error('Cannot delete default category');
     }
 
     const { error } = await supabase
@@ -159,10 +159,10 @@ export async function findCategoryByName(name: string): Promise<Category | null>
 export async function mergeCategory(sourceCategoryId: string, targetCategoryId: string): Promise<void> {
   try {
     const user = await getCurrentUser();
-    if (!user) throw new Error('未登录');
+    if (!user) throw new Error('Not logged in');
 
     if (sourceCategoryId === targetCategoryId) {
-      throw new Error('不能将分类合并到自己');
+      throw new Error('Cannot merge category to itself');
     }
 
     // 验证两个分类都属于当前家庭
@@ -174,14 +174,14 @@ export async function mergeCategory(sourceCategoryId: string, targetCategoryId: 
 
     if (fetchError) throw fetchError;
     if (!categories || categories.length !== 2) {
-      throw new Error('分类不存在或不属于当前家庭');
+      throw new Error('Category does not exist or does not belong to current household');
     }
 
     const sourceCategory = categories.find(cat => cat.id === sourceCategoryId);
     const targetCategory = categories.find(cat => cat.id === targetCategoryId);
 
     if (!sourceCategory || !targetCategory) {
-      throw new Error('分类不存在');
+      throw new Error('Category does not exist');
     }
 
     // 更新所有使用源分类的商品项，将它们指向目标分类

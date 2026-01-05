@@ -5,7 +5,7 @@ import Constants from 'expo-constants';
 const apiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
 
 if (!apiKey) {
-  throw new Error('缺少 Gemini API Key');
+  throw new Error('Missing Gemini API Key');
 }
 
 const genAI = new GoogleGenerativeAI(apiKey);

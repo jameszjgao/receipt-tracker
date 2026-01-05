@@ -14,6 +14,7 @@ export default function CameraScreen() {
   const [facing, setFacing] = useState<CameraType>('back');
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [capturedReceiptId, setCapturedReceiptId] = useState<string | null>(null);
   const cameraRef = useRef<CameraView>(null);
   const router = useRouter();
 
@@ -35,9 +36,9 @@ export default function CameraScreen() {
   if (!permission.granted) {
     return (
       <View style={styles.container}>
-        <Text style={styles.message}>需要相机权限来拍摄小票</Text>
+        <Text style={styles.message}>Camera permission is required to capture receipts</Text>
         <TouchableOpacity style={styles.button} onPress={requestPermission}>
-          <Text style={styles.buttonText}>授予权限</Text>
+          <Text style={styles.buttonText}>Grant Permission</Text>
         </TouchableOpacity>
       </View>
     );
@@ -68,7 +69,7 @@ export default function CameraScreen() {
       const today = new Date().toISOString().split('T')[0];
       const receiptId = await saveReceipt({
         householdId: '', // 会在 saveReceipt 中自动获取
-        storeName: '识别中...',
+        storeName: 'Processing...',
         totalAmount: 0,
         date: today,
         status: 'processing', // 处理中
@@ -78,25 +79,7 @@ export default function CameraScreen() {
       console.log('小票记录已创建，ID:', receiptId);
 
       setIsProcessing(false);
-
-      // 3. 立即返回，让用户可以继续操作
-      Alert.alert(
-        '小票已保存',
-        '正在后台识别中，请稍后查看结果',
-        [
-          {
-            text: '查看详情',
-            onPress: () => router.replace(`/receipt-details/${receiptId}`),
-          },
-          {
-            text: '继续拍摄',
-            style: 'cancel',
-            onPress: () => {
-              // 继续拍摄，不跳转
-            },
-          },
-        ]
-      );
+      setCapturedReceiptId(receiptId);
 
       // 4. 在后台异步处理识别（不阻塞用户）
       // 使用 Promise 但不 await，让它在后台运行
@@ -111,11 +94,11 @@ export default function CameraScreen() {
     } catch (error) {
       setIsProcessing(false);
       console.error('Take picture error:', error);
-      const errorMessage = error instanceof Error ? error.message : '处理小票时出错';
+      const errorMessage = error instanceof Error ? error.message : 'Error processing receipt';
       Alert.alert(
-        '识别失败', 
-        errorMessage + '\n\n请检查：\n1. Gemini API Key 是否正确配置\n2. 网络连接是否正常\n3. API 配额是否充足',
-        [{ text: '确定' }]
+        'Recognition Failed', 
+        errorMessage + '\n\nPlease check:\n1. Gemini API Key configuration\n2. Network connection\n3. API quota',
+        [{ text: 'OK' }]
       );
     }
   };
@@ -142,7 +125,7 @@ export default function CameraScreen() {
         const today = new Date().toISOString().split('T')[0];
         const receiptId = await saveReceipt({
           householdId: '', // 会在 saveReceipt 中自动获取
-          storeName: '识别中...',
+          storeName: 'Processing...',
           totalAmount: 0,
           date: today,
           status: 'processing', // 处理中
@@ -152,22 +135,7 @@ export default function CameraScreen() {
         console.log('小票记录已创建，ID:', receiptId);
 
         setIsProcessing(false);
-
-        // 3. 立即返回，让用户可以继续操作
-        Alert.alert(
-          '小票已保存',
-          '正在后台识别中，请稍后查看结果',
-          [
-            {
-              text: '查看详情',
-              onPress: () => router.replace(`/receipt-details/${receiptId}`),
-            },
-            {
-              text: '继续',
-              style: 'cancel',
-            },
-          ]
-        );
+        setCapturedReceiptId(receiptId);
 
         // 4. 在后台异步处理识别（不阻塞用户）
         processReceiptInBackground(imageUrl, receiptId, imageUri)
@@ -183,21 +151,68 @@ export default function CameraScreen() {
     } catch (error) {
       setIsProcessing(false);
       console.error('Image picker error:', error);
-      const errorMessage = error instanceof Error ? error.message : '处理小票时出错';
+      const errorMessage = error instanceof Error ? error.message : 'Error processing receipt';
       Alert.alert(
-        '识别失败', 
-        errorMessage + '\n\n请检查：\n1. Gemini API Key 是否正确配置\n2. 网络连接是否正常\n3. API 配额是否充足',
-        [{ text: '确定' }]
+        'Recognition Failed', 
+        errorMessage + '\n\nPlease check:\n1. Gemini API Key configuration\n2. Network connection\n3. API quota',
+        [{ text: 'OK' }]
       );
     }
   };
+
+  // 如果拍摄完成，显示操作界面
+  if (capturedReceiptId) {
+    return (
+      <View style={styles.actionContainer}>
+        <View style={styles.actionContent}>
+          <View style={styles.successIconContainer}>
+            <Ionicons name="checkmark-circle" size={80} color="#00B894" />
+          </View>
+          <Text style={styles.successTitle}>Receipt Saved</Text>
+          <Text style={styles.successSubtitle}>Processing, Check details later</Text>
+          
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => {
+                setCapturedReceiptId(null);
+              }}
+            >
+              <Ionicons name="camera" size={24} color="#6C5CE7" />
+              <Text style={styles.actionButtonText}>Snap Another</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => {
+                router.push(`/receipt-details/${capturedReceiptId}`);
+              }}
+            >
+              <Ionicons name="document-text" size={24} color="#6C5CE7" />
+              <Text style={styles.actionButtonText}>View Details</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => {
+                router.push('/receipts');
+              }}
+            >
+              <Ionicons name="list" size={24} color="#6C5CE7" />
+              <Text style={styles.actionButtonText}>View List</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
       {isProcessing ? (
         <View style={styles.processingContainer}>
           <ActivityIndicator size="large" color="#6C5CE7" />
-          <Text style={styles.processingText}>正在识别小票...</Text>
+          <Text style={styles.processingText}>Processing receipt...</Text>
         </View>
       ) : (
         <CameraView
@@ -314,6 +329,58 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginTop: 20,
     fontSize: 16,
+  },
+  actionContainer: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  actionContent: {
+    width: '100%',
+    maxWidth: 400,
+    alignItems: 'center',
+  },
+  successIconContainer: {
+    marginBottom: 24,
+  },
+  successTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#2D3436',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  successSubtitle: {
+    fontSize: 16,
+    color: '#636E72',
+    textAlign: 'center',
+    marginBottom: 40,
+    paddingHorizontal: 20,
+  },
+  actionButtons: {
+    width: '100%',
+    alignItems: 'center',
+    gap: 16,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#6C5CE7',
+    gap: 12,
+    width: '80%',
+    maxWidth: 300,
+  },
+  actionButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6C5CE7',
   },
 });
 

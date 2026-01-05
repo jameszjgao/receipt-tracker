@@ -26,7 +26,7 @@ export default function HomeScreen() {
       <View style={styles.container}>
         <StatusBar style="dark" />
         <View style={styles.content}>
-          <Text style={styles.title}>加载中...</Text>
+          <Text style={styles.title}>Loading...</Text>
         </View>
       </View>
     );
@@ -41,29 +41,36 @@ export default function HomeScreen() {
       <StatusBar style="dark" />
       
       <View style={styles.content}>
-        <Text style={styles.title}>📸 拍一张小票，</Text>
-        <Text style={styles.subtitle}>整理一切</Text>
+        <Text style={styles.title}>📸 Snap a receipt,</Text>
+        <Text style={styles.subtitle}>organize everything</Text>
         
-        <View style={styles.iconContainer}>
+        <TouchableOpacity 
+          style={styles.iconContainer}
+          onPress={() => router.push('/camera')}
+          activeOpacity={0.8}
+        >
           <View style={styles.circle}>
             <Ionicons name="camera" size={80} color="#6C5CE7" />
           </View>
-        </View>
-      </View>
+        </TouchableOpacity>
 
-      <TouchableOpacity 
-        style={styles.button}
-        onPress={() => router.push('/camera')}
-      >
-        <Ionicons name="camera-outline" size={24} color="#fff" style={styles.buttonIcon} />
-        <Text style={styles.buttonText}>拍摄小票</Text>
-      </TouchableOpacity>
+        <TouchableOpacity 
+          style={styles.chatIconContainer}
+          onPress={() => router.push('/voice-input')}
+          activeOpacity={0.8}
+        >
+          <View style={styles.chatCircle}>
+            <Ionicons name="chatbubble-outline" size={60} color="#6C5CE7" />
+          </View>
+        </TouchableOpacity>
+      </View>
 
       <TouchableOpacity 
         style={styles.secondaryButton}
         onPress={() => router.push('/receipts')}
       >
-        <Text style={styles.secondaryButtonText}>查看我的小票列表</Text>
+        <Ionicons name="list-outline" size={20} color="#6C5CE7" style={styles.buttonIcon} />
+        <Text style={styles.secondaryButtonText}>View My Receipts</Text>
       </TouchableOpacity>
     </View>
   );
@@ -107,6 +114,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  chatIconContainer: {
+    marginTop: 32,
+  },
+  chatCircle: {
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: '#E9ECEF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   button: {
     backgroundColor: '#6C5CE7',
     borderRadius: 16,
@@ -135,7 +153,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 16,
     paddingHorizontal: 32,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#6C5CE7',
   },

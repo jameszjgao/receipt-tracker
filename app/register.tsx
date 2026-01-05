@@ -28,17 +28,17 @@ export default function RegisterScreen() {
 
   const handleRegister = async () => {
     if (!email.trim()) {
-      Alert.alert('错误', '请输入邮箱');
+      Alert.alert('Error', 'Please enter email');
       return;
     }
 
     if (password.length < 6) {
-      Alert.alert('错误', '密码至少需要6个字符');
+      Alert.alert('Error', 'Password must be at least 6 characters');
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('错误', '两次输入的密码不一致');
+      Alert.alert('Error', 'Passwords do not match');
       return;
     }
 
@@ -50,27 +50,27 @@ export default function RegisterScreen() {
       if (error) {
         console.error('Registration error:', error);
         Alert.alert(
-          '注册失败', 
-          error.message + '\n\n请检查：\n1. 邮箱是否已被使用\n2. 网络连接是否正常\n3. Supabase 配置是否正确',
-          [{ text: '确定' }]
+          'Registration Failed', 
+          error.message + '\n\nPlease check:\n1. Email may already be in use\n2. Network connection\n3. Supabase configuration',
+          [{ text: 'OK' }]
         );
       } else if (user) {
-        Alert.alert('注册成功', '欢迎使用家庭记账！', [
+        Alert.alert('Registration Successful', 'Welcome to Receipt Tracker!', [
           {
-            text: '确定',
+            text: 'OK',
             onPress: () => router.replace('/'),
           },
         ]);
       } else {
-        Alert.alert('注册失败', '未知错误，请重试');
+        Alert.alert('Registration Failed', 'Unknown error, please try again');
       }
     } catch (err) {
       setLoading(false);
       console.error('Registration exception:', err);
       Alert.alert(
-        '注册失败', 
-        err instanceof Error ? err.message : '未知错误',
-        [{ text: '确定' }]
+        'Registration Failed', 
+        err instanceof Error ? err.message : 'Unknown error',
+        [{ text: 'OK' }]
       );
     }
   };
@@ -98,8 +98,8 @@ export default function RegisterScreen() {
               <Ionicons name="people" size={60} color="#6C5CE7" />
             </View>
           </View>
-          <Text style={styles.title}>创建账户</Text>
-          <Text style={styles.subtitle}>开始您的家庭记账之旅</Text>
+          <Text style={styles.title}>Create Account</Text>
+          <Text style={styles.subtitle}>Start your receipt tracking journey</Text>
         </View>
 
         <View style={styles.form}>
@@ -107,7 +107,7 @@ export default function RegisterScreen() {
             <Ionicons name="mail-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="邮箱"
+              placeholder="Email"
               placeholderTextColor="#95A5A6"
               value={email}
               onChangeText={setEmail}
@@ -121,7 +121,7 @@ export default function RegisterScreen() {
             <Ionicons name="home-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="家庭名称（可选）"
+              placeholder="Household Name (Optional)"
               placeholderTextColor="#95A5A6"
               value={householdName}
               onChangeText={setHouseholdName}
@@ -132,7 +132,7 @@ export default function RegisterScreen() {
             <Ionicons name="lock-closed-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="密码（至少6个字符）"
+              placeholder="Password (at least 6 characters)"
               placeholderTextColor="#95A5A6"
               value={password}
               onChangeText={setPassword}
@@ -156,7 +156,7 @@ export default function RegisterScreen() {
             <Ionicons name="lock-closed-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="确认密码"
+              placeholder="Confirm Password"
               placeholderTextColor="#95A5A6"
               value={confirmPassword}
               onChangeText={setConfirmPassword}
@@ -184,7 +184,7 @@ export default function RegisterScreen() {
             {loading ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.buttonText}>注册</Text>
+              <Text style={styles.buttonText}>Sign Up</Text>
             )}
           </TouchableOpacity>
 
@@ -193,7 +193,7 @@ export default function RegisterScreen() {
             onPress={() => router.push('/login')}
           >
             <Text style={styles.linkText}>
-              已有账户？<Text style={styles.linkTextBold}>登录</Text>
+              Already have an account? <Text style={styles.linkTextBold}>Sign In</Text>
             </Text>
           </TouchableOpacity>
         </View>

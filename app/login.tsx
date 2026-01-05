@@ -24,7 +24,7 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
-      Alert.alert('错误', '请填写邮箱和密码');
+      Alert.alert('Error', 'Please enter email and password');
       return;
     }
 
@@ -33,7 +33,7 @@ export default function LoginScreen() {
     setLoading(false);
 
     if (error) {
-      Alert.alert('登录失败', error.message);
+      Alert.alert('Login Failed', error.message);
     } else {
       router.replace('/');
     }
@@ -52,8 +52,8 @@ export default function LoginScreen() {
               <Ionicons name="receipt" size={60} color="#6C5CE7" />
             </View>
           </View>
-          <Text style={styles.title}>欢迎回来</Text>
-          <Text style={styles.subtitle}>登录您的家庭账户</Text>
+          <Text style={styles.title}>Welcome Back</Text>
+          <Text style={styles.subtitle}>Sign in to your account</Text>
         </View>
 
         <View style={styles.form}>
@@ -61,7 +61,7 @@ export default function LoginScreen() {
             <Ionicons name="mail-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="邮箱"
+              placeholder="Email"
               placeholderTextColor="#95A5A6"
               value={email}
               onChangeText={setEmail}
@@ -75,7 +75,7 @@ export default function LoginScreen() {
             <Ionicons name="lock-closed-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="密码"
+              placeholder="Password"
               placeholderTextColor="#95A5A6"
               value={password}
               onChangeText={setPassword}
@@ -104,7 +104,7 @@ export default function LoginScreen() {
               <ActivityIndicator color="#fff" />
             ) : (
               <>
-                <Text style={styles.buttonText}>登录</Text>
+                <Text style={styles.buttonText}>Sign In</Text>
               </>
             )}
           </TouchableOpacity>
@@ -114,7 +114,7 @@ export default function LoginScreen() {
             onPress={() => router.push('/register')}
           >
             <Text style={styles.linkText}>
-              还没有账户？<Text style={styles.linkTextBold}>注册</Text>
+              Don't have an account? <Text style={styles.linkTextBold}>Sign Up</Text>
             </Text>
           </TouchableOpacity>
         </View>

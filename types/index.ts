@@ -1,5 +1,5 @@
 // 小票状态
-export type ReceiptStatus = 'pending' | 'processing' | 'confirmed';
+export type ReceiptStatus = 'pending' | 'processing' | 'confirmed' | 'needs_retake' | 'duplicate';
 
 // 商品用途
 export type ItemPurpose = 'Personnel' | 'Business';
@@ -53,6 +53,8 @@ export interface Receipt {
   updatedAt?: string;
   processedBy?: string;
   confidence?: number; // 整体识别置信度
+  currency?: string; // 币种，如：CNY、USD
+  tax?: number; // 税费
 }
 
 // 用户数据
@@ -71,6 +73,22 @@ export interface Household {
   updatedAt?: string;
 }
 
+// 图片质量评价
+export interface ImageQuality {
+  clarity?: number; // 清晰度评分 0-1
+  completeness?: number; // 完整度评分 0-1
+  clarityComment?: string; // 清晰度评价文字
+  completenessComment?: string; // 完整度评价文字
+}
+
+// 数据一致性检查
+export interface DataConsistency {
+  itemsSum?: number; // 明细金额总和
+  itemsSumMatchesTotal?: boolean; // 明细总和是否与总金额一致
+  missingItems?: boolean; // 是否可能有遗漏的商品项
+  consistencyComment?: string; // 一致性评价文字
+}
+
 // Gemini识别结果（使用分类名称，后续会匹配到分类ID）
 export interface GeminiReceiptResult {
   storeName: string;
@@ -87,6 +105,8 @@ export interface GeminiReceiptResult {
     isAsset?: boolean; // 可选
     confidence?: number; // 可选
   }>;
-  confidence?: number; // 可选，整体识别置信度
+  confidence?: number; // 可选，整体识别置信度 0-1
+  imageQuality?: ImageQuality; // 图片质量评价
+  dataConsistency?: DataConsistency; // 数据一致性检查
 }
 

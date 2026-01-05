@@ -12,19 +12,21 @@ export default function RootLayout() {
         <Stack.Screen 
           name="receipts" 
           options={{ 
-          title: '我的小票'
+            title: 'My Receipts',
+            headerBackTitle: 'Home'
           }} 
         />
         <Stack.Screen 
           name="receipt-details/[id]" 
           options={{ 
-          title: '小票详情'
+          title: 'Receipt Details'
           }} 
         />
         <Stack.Screen 
           name="camera" 
           options={{ 
-          title: '拍摄小票'
+            title: '',
+            headerBackTitle: 'Home'
           }} 
         />
         <Stack.Screen 
@@ -37,6 +39,38 @@ export default function RootLayout() {
           name="register" 
           options={{ 
             headerShown: false
+          }} 
+        />
+        <Stack.Screen 
+          name="categories-manage" 
+          options={{ 
+            title: 'Manage Categories'
+          }} 
+        />
+        <Stack.Screen 
+          name="purposes-manage" 
+          options={{ 
+            title: 'Manage Purposes'
+          }} 
+        />
+        <Stack.Screen 
+          name="payment-accounts-manage" 
+          options={{ 
+            title: 'Manage Payment Accounts'
+          }} 
+        />
+        <Stack.Screen 
+          name="voice-input" 
+          options={{ 
+            title: 'Chat to Log',
+            presentation: 'modal'
+          }} 
+        />
+        <Stack.Screen 
+          name="manual-entry" 
+          options={{ 
+            title: 'Add Receipt',
+            presentation: 'modal'
           }} 
         />
       </Stack>
