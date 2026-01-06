@@ -40,6 +40,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
         image_url: receipt.imageUrl,
         confidence: receipt.confidence,
         processed_by: receipt.processedBy,
+        created_by: user.id, // 记录提交者
       })
       .select()
       .single();
@@ -268,6 +269,11 @@ export async function getAllReceipts(): Promise<Receipt[]> {
       .select(`
         *,
         payment_accounts (*),
+        created_by_user:users!created_by (
+          id,
+          email,
+          name
+        ),
         receipt_items (
           *,
           categories (*)
@@ -302,6 +308,12 @@ export async function getAllReceipts(): Promise<Receipt[]> {
       processedBy: row.processed_by,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      createdBy: row.created_by,
+      createdByUser: row.created_by_user ? {
+        id: row.created_by_user.id,
+        email: row.created_by_user.email,
+        name: row.created_by_user.name,
+      } : undefined,
       items: (row.receipt_items || []).map((item: any) => ({
         id: item.id,
         name: item.name,
@@ -362,6 +374,54 @@ export async function updateReceiptItem(
   }
 }
 
+// 获取用户历史小票中最频繁的币种
+export async function getMostFrequentCurrency(): Promise<string | null> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Not logged in');
+
+    // 查询当前家庭的所有小票，统计币种出现频次
+    const { data, error } = await supabase
+      .from('receipts')
+      .select('currency')
+      .eq('household_id', user.householdId)
+      .not('currency', 'is', null);
+
+    if (error) {
+      console.warn('Error fetching currency statistics:', error);
+      return null;
+    }
+
+    if (!data || data.length === 0) {
+      return null;
+    }
+
+    // 统计币种出现频次
+    const currencyCount: Record<string, number> = {};
+    data.forEach((receipt: any) => {
+      const currency = receipt.currency;
+      if (currency) {
+        currencyCount[currency] = (currencyCount[currency] || 0) + 1;
+      }
+    });
+
+    // 找到出现次数最多的币种
+    let mostFrequentCurrency: string | null = null;
+    let maxCount = 0;
+    for (const [currency, count] of Object.entries(currencyCount)) {
+      if (count > maxCount) {
+        maxCount = count;
+        mostFrequentCurrency = currency;
+      }
+    }
+
+    return mostFrequentCurrency;
+  } catch (error) {
+    console.warn('Error getting most frequent currency:', error);
+    return null;
+  }
+}
+
 // 根据ID获取小票
 export async function getReceiptById(receiptId: string): Promise<Receipt | null> {
   try {
@@ -373,6 +433,11 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
       .select(`
         *,
         payment_accounts (*),
+        created_by_user:users!created_by (
+          id,
+          email,
+          name
+        ),
         receipt_items (
           *,
           categories (*)
@@ -412,6 +477,12 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
       processedBy: data.processed_by,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
+      createdBy: data.created_by,
+      createdByUser: data.created_by_user ? {
+        id: data.created_by_user.id,
+        email: data.created_by_user.email,
+        name: data.created_by_user.name,
+      } : undefined,
       items: (data.receipt_items || []).map((item: any) => ({
         id: item.id,
         name: item.name,

@@ -6,6 +6,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as FileSystemNew from 'expo-file-system';
 import { GeminiReceiptResult, ItemPurpose } from '@/types';
 import { getAvailableImageModel } from './gemini-helper';
+import { getMostFrequentCurrency } from './database';
 
 const apiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
 
@@ -263,7 +264,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
         storeName: parsedResult.storeName || 'Unknown Store',
         date: parsedResult.date || new Date().toISOString().split('T')[0],
         totalAmount: totalAmount,
-        currency: parsedResult.currency || 'CNY',
+        currency: parsedResult.currency || defaultCurrency,
         paymentAccountName: paymentAccountName,
         tax: tax,
         items: parsedResult.items.map(item => ({
@@ -396,6 +397,20 @@ export async function recognizeReceiptFromText(text: string): Promise<GeminiRece
 
   if (categoryNames.length === 0) {
     categoryNames = ['Food', 'Dining Out', 'Home', 'Transportation', 'Shopping', 'Medical', 'Education'];
+  }
+
+  // 获取用户历史小票中最频繁的币种，作为默认币种
+  let defaultCurrency = 'USD'; // 文本识别的默认值
+  try {
+    const mostFrequentCurrency = await getMostFrequentCurrency();
+    if (mostFrequentCurrency) {
+      defaultCurrency = mostFrequentCurrency;
+      console.log('Using most frequent currency as default:', defaultCurrency);
+    } else {
+      console.log('No currency history found, using default:', defaultCurrency);
+    }
+  } catch (error) {
+    console.warn('Failed to fetch most frequent currency, using default:', error);
   }
 
   const categoryList = categoryNames.join(', ');
@@ -684,10 +699,16 @@ Example JSON format:
           parsedResult.confidence = 0.8; // 默认置信度
         }
 
+        // 确保 currency 存在，使用默认币种
+        if (!parsedResult.currency) {
+          parsedResult.currency = defaultCurrency;
+        }
+
         console.log('Final parsed result:', {
           storeName: parsedResult.storeName,
           date: parsedResult.date,
           totalAmount: parsedResult.totalAmount,
+          currency: parsedResult.currency,
           itemsCount: parsedResult.items.length,
           items: parsedResult.items.map((item: any) => ({ name: item.name, price: item.price })),
         });
@@ -740,6 +761,20 @@ export async function recognizeReceiptFromAudio(audioUri: string): Promise<Gemin
     purposeNames = ['Home', 'Gifts', 'Business'];
   }
 
+  // 获取用户历史小票中最频繁的币种，作为默认币种
+  let defaultCurrency = 'USD'; // 音频识别的默认值
+  try {
+    const mostFrequentCurrency = await getMostFrequentCurrency();
+    if (mostFrequentCurrency) {
+      defaultCurrency = mostFrequentCurrency;
+      console.log('Using most frequent currency as default:', defaultCurrency);
+    } else {
+      console.log('No currency history found, using default:', defaultCurrency);
+    }
+  } catch (error) {
+    console.warn('Failed to fetch most frequent currency, using default:', error);
+  }
+
   const categoryList = categoryNames.join(', ');
   const purposeList = purposeNames.join(', ');
 
@@ -747,7 +782,7 @@ export async function recognizeReceiptFromAudio(audioUri: string): Promise<Gemin
 1. Store name (storeName)
 2. Date (date, format: YYYY-MM-DD, use today's date if not mentioned)
 3. Total amount (totalAmount, numeric type)
-4. Currency (currency, such as: CNY, USD, etc., default to USD if not mentioned)
+4. Currency (currency, such as: CNY, USD, etc., default to ${defaultCurrency} if not mentioned)
 5. Payment account (paymentAccountName, if available, MUST include key distinguishing information such as:
    - Card number suffix (last 4 digits, e.g., ****1234, *1234, Last 4: 1234)
    - Account type (Credit Card, Debit Card, Cash, etc.)
@@ -879,6 +914,11 @@ Please return strictly in JSON format without any extra text. JSON format as fol
             const tax = parsedResult.tax || 0;
             parsedResult.dataConsistency.itemsSumMatchesTotal = Math.abs(itemsSum + tax - total) < 0.01;
           }
+        }
+
+        // 确保 currency 存在，使用默认币种
+        if (!parsedResult.currency) {
+          parsedResult.currency = defaultCurrency;
         }
 
         return parsedResult as GeminiReceiptResult;

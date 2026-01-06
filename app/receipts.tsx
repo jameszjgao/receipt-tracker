@@ -452,16 +452,29 @@ export default function ReceiptsScreen() {
               <Text style={styles.storeName} numberOfLines={1}>
                 {item.storeName}
               </Text>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    { backgroundColor: statusColors[item.status] },
-                  ]}
-                >
-                  <Text style={styles.statusText}>
-                    {statusLabels[item.status]}
-                  </Text>
-                </View>
+                {item.status === 'confirmed' ? (
+                  <View style={styles.confirmedStatusContainer}>
+                    <View style={styles.confirmedBadge}>
+                      <Ionicons name="checkmark" size={14} color="#fff" />
+                    </View>
+                    {item.createdByUser && (
+                      <Text style={styles.confirmedByText}>
+                        by {item.createdByUser.name || item.createdByUser.email?.split('@')[0] || 'Unknown'}
+                      </Text>
+                    )}
+                  </View>
+                ) : (
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      { backgroundColor: statusColors[item.status] },
+                    ]}
+                  >
+                    <Text style={styles.statusText}>
+                      {statusLabels[item.status]}
+                    </Text>
+                  </View>
+                )}
                   </View>
                   <View style={styles.secondRow}>
                     <Text style={styles.amount}>${item.totalAmount.toFixed(2)}</Text>
@@ -675,6 +688,24 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: '600',
+  },
+  confirmedStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  confirmedBadge: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: statusColors.confirmed,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  confirmedByText: {
+    fontSize: 12,
+    color: '#636E72',
+    fontWeight: '500',
   },
   secondRow: {
     flexDirection: 'row',

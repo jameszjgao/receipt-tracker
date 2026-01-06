@@ -55,6 +55,8 @@ export interface Receipt {
   confidence?: number; // 整体识别置信度
   currency?: string; // 币种，如：CNY、USD
   tax?: number; // 税费
+  createdBy?: string; // 提交者用户ID
+  createdByUser?: User; // 提交者用户信息
 }
 
 // 用户数据

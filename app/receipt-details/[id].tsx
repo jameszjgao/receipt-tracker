@@ -433,51 +433,65 @@ export default function ReceiptDetailsScreen() {
             )}
           </TouchableOpacity>
           <View style={styles.summaryContent}>
-            <Text style={styles.storeName} numberOfLines={1}>
-              {currentReceipt.storeName}
-            </Text>
-            <View style={styles.amountRow}>
-              <View style={styles.amountContainer}>
-                {currentReceipt.currency && (
-                  <Text style={styles.currencyLabel}>{currentReceipt.currency}</Text>
-                )}
-                {editing ? (
-                  <Text style={styles.totalAmount}>
-                    {(() => {
-                      const itemsSum = calculateItemsSum(editedReceipt?.items || []);
-                      const tax = editedReceipt?.tax || 0;
-                      return (itemsSum + tax).toFixed(2);
-                    })()}
-                  </Text>
-                ) : (
-                  <Text style={styles.totalAmount}>
-                    {currentReceipt.totalAmount.toFixed(2)}
-                  </Text>
-                )}
-                {editing ? (
-                  <View style={styles.taxInputContainer}>
-                    <Text style={styles.taxLabel}>Tax: </Text>
-                    <TextInput
-                      style={styles.taxInput}
-                      value={(editedReceipt?.tax || 0).toString()}
-                      onChangeText={(text) => {
-                        const tax = parseFloat(text) || 0;
-                        handleTaxChange(tax);
-                      }}
-                      keyboardType="numeric"
-                      placeholder="0.00"
-                    />
+            <View style={styles.summaryContentTop}>
+              <View style={styles.summaryContentMain}>
+                <Text style={styles.storeName} numberOfLines={1}>
+                  {currentReceipt.storeName}
+                </Text>
+                <View style={styles.amountRow}>
+                  <View style={styles.amountContainer}>
+                    {currentReceipt.currency && (
+                      <Text style={styles.currencyLabel}>{currentReceipt.currency}</Text>
+                    )}
+                    {editing ? (
+                      <Text style={styles.totalAmount}>
+                        {(() => {
+                          const itemsSum = calculateItemsSum(editedReceipt?.items || []);
+                          const tax = editedReceipt?.tax || 0;
+                          return (itemsSum + tax).toFixed(2);
+                        })()}
+                      </Text>
+                    ) : (
+                      <Text style={styles.totalAmount}>
+                        {currentReceipt.totalAmount.toFixed(2)}
+                      </Text>
+                    )}
+                    {editing ? (
+                      <View style={styles.taxInputContainer}>
+                        <Text style={styles.taxLabel}>Tax: </Text>
+                        <TextInput
+                          style={styles.taxInput}
+                          value={(editedReceipt?.tax || 0).toString()}
+                          onChangeText={(text) => {
+                            const tax = parseFloat(text) || 0;
+                            handleTaxChange(tax);
+                          }}
+                          keyboardType="numeric"
+                          placeholder="0.00"
+                        />
+                      </View>
+                    ) : (
+                      currentReceipt.tax !== undefined && currentReceipt.tax > 0 && (
+                        <Text style={styles.taxText}>
+                          Tax: {currentReceipt.tax.toFixed(2)}
+                        </Text>
+                      )
+                    )}
                   </View>
-                ) : (
-                  currentReceipt.tax !== undefined && currentReceipt.tax > 0 && (
-                    <Text style={styles.taxText}>
-                      Tax: {currentReceipt.tax.toFixed(2)}
-                    </Text>
-                  )
-                )}
+                </View>
+                <Text style={styles.date}>{formatDate(currentReceipt.date)}</Text>
               </View>
+              {currentReceipt.createdAt && (
+                <View style={styles.submittedInfo}>
+                  <Text style={styles.submittedText}>
+                    {format(new Date(currentReceipt.createdAt), 'MMM dd, yyyy')}
+                    {currentReceipt.createdByUser && (
+                      <> by {currentReceipt.createdByUser.name || currentReceipt.createdByUser.email?.split('@')[0] || 'Unknown'}</>
+                    )}
+                  </Text>
+                </View>
+              )}
             </View>
-            <Text style={styles.date}>{formatDate(currentReceipt.date)}</Text>
           </View>
         </View>
 
@@ -1072,6 +1086,22 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'space-between',
   },
+  summaryContentTop: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  summaryContentMain: {
+    flex: 1,
+  },
+  submittedInfo: {
+    alignSelf: 'flex-end',
+    marginTop: 4,
+  },
+  submittedText: {
+    fontSize: 11,
+    color: '#95A5A6',
+    textAlign: 'right',
+  },
   storeName: {
     fontSize: 17,
     fontWeight: '600',
@@ -1133,9 +1163,11 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   date: {
-    fontSize: 13,
+    fontSize: 15,
     color: '#636E72',
-    lineHeight: 18,
+    lineHeight: 16,
+    marginTop: 8,
+    marginBottom: 0,
   },
   paymentCard: {
     backgroundColor: '#fff',
