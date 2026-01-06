@@ -46,7 +46,8 @@ export default function ReceiptDetailsScreen() {
     loadPaymentAccounts();
   }, [id]);
 
-  // 当页面获得焦点时（从其他页面返回），重新加载分类、用途和支付账户
+  // 当页面获得焦点时（从其他页面返回），只重新加载分类、用途和支付账户（因为这些可能在管理页面被修改）
+  // 小票数据不需要重新加载，除非id改变
   useFocusEffect(
     useCallback(() => {
       loadCategories();
@@ -111,6 +112,7 @@ export default function ReceiptDetailsScreen() {
       });
       Alert.alert('Success', 'Receipt confirmed and saved');
       setEditing(false);
+      // 只重新加载当前小票，不需要重新加载分类、用途和支付账户
       loadReceipt();
     } catch (error) {
       Alert.alert('Error', 'Failed to save');

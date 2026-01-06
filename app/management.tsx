@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { getCurrentHousehold, getCurrentUser, getUserHouseholds, setCurrentHousehold, createHousehold, signOut } from '@/lib/auth';
+import { initializeAuthCache, updateCachedUser, updateCachedHousehold } from '@/lib/auth-cache';
 import { supabase } from '@/lib/supabase';
 import { Household, UserHousehold, User } from '@/types';
 
@@ -25,7 +26,7 @@ export default function ManagementScreen() {
   const router = useRouter();
   const [household, setHousehold] = useState<Household | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
   const [householdName, setHouseholdName] = useState('');
   const [householdAddress, setHouseholdAddress] = useState('');
@@ -45,32 +46,58 @@ export default function ManagementScreen() {
     loadData();
   }, []);
 
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        const householdData = await getCurrentHousehold();
-        if (householdData) {
-          setHousehold(householdData);
-          setHouseholdName(householdData.name);
-          setHouseholdAddress(householdData.address || '');
-        }
-        const userData = await getCurrentUser();
-        setUser(userData);
-        setPersonalName(userData?.name || '');
-      } catch (error) {
-        console.error('Error loading data:', error);
-        Alert.alert('Error', 'Failed to load household information');
-      } finally {
-        setLoading(false);
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      // 使用缓存，不需要强制刷新（除非数据被修改了）
+      const householdData = await getCurrentHousehold();
+      if (householdData) {
+        setHousehold(householdData);
+        setHouseholdName(householdData.name);
+        setHouseholdAddress(householdData.address || '');
       }
-    };
+      const userData = await getCurrentUser();
+      setUser(userData);
+      setPersonalName(userData?.name || '');
+    } catch (error) {
+      console.error('Error loading data:', error);
+      Alert.alert('Error', 'Failed to load household information');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  // 当页面获得焦点时重新加载数据
-  useFocusEffect(
-    useCallback(() => {
+  // 只加载家庭信息
+  const loadHouseholdOnly = async () => {
+    try {
+      const householdData = await getCurrentHousehold();
+      if (householdData) {
+        setHousehold(householdData);
+        setHouseholdName(householdData.name);
+        setHouseholdAddress(householdData.address || '');
+      }
+    } catch (error) {
+      console.error('Error loading household:', error);
+      // 失败时重新加载所有数据以确保一致性
       loadData();
-    }, [])
-  );
+    }
+  };
+
+  // 只加载用户信息
+  const loadUserOnly = async () => {
+    try {
+      const userData = await getCurrentUser();
+      setUser(userData);
+      setPersonalName(userData?.name || '');
+    } catch (error) {
+      console.error('Error loading user:', error);
+      // 失败时重新加载所有数据以确保一致性
+      loadData();
+    }
+  };
+
+  // 当页面获得焦点时不再重新加载数据（数据已在登录时缓存）
+  // useFocusEffect 已移除，避免重复从数据库读取
 
   const loadHouseholds = async () => {
     try {
@@ -103,8 +130,18 @@ export default function ManagementScreen() {
 
       if (error) throw error;
 
+      // 乐观更新：直接更新状态，不需要重新加载所有数据
+      const updatedHousehold = household ? {
+        ...household,
+        name: householdName.trim(),
+        address: householdAddress.trim() || null,
+      } : null;
+      setHousehold(updatedHousehold);
+      // 更新缓存
+      if (updatedHousehold) {
+        updateCachedHousehold(updatedHousehold);
+      }
       setEditing(false);
-      await loadData();
     } catch (error) {
       console.error('Error updating household:', error);
       Alert.alert('Error', 'Failed to update household information');
@@ -133,8 +170,17 @@ export default function ManagementScreen() {
 
       if (error) throw error;
 
+      // 乐观更新：直接更新状态，不需要重新加载所有数据
+      const updatedUser = user ? {
+        ...user,
+        name: personalName.trim() || null,
+      } : null;
+      setUser(updatedUser);
+      // 更新缓存
+      if (updatedUser) {
+        updateCachedUser(updatedUser);
+      }
       setEditingPersonal(false);
-      await loadData();
     } catch (error) {
       console.error('Error updating user:', error);
       Alert.alert('Error', 'Failed to update personal information');
@@ -156,9 +202,25 @@ export default function ManagementScreen() {
       const { error } = await setCurrentHousehold(householdId);
       if (error) {
         Alert.alert('Error', error.message);
+        setSwitching(false);
         return;
       }
+
+      // 更新缓存
+      const updatedUser = await getCurrentUser(true);
+      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
+      await initializeAuthCache(updatedUser, updatedHousehold);
+
       setShowHouseholdSwitch(false);
+      
+      // 更新本地状态
+      if (updatedHousehold) {
+        setHousehold(updatedHousehold);
+        setHouseholdName(updatedHousehold.name);
+        setHouseholdAddress(updatedHousehold.address || '');
+      }
+      
+      // 重新加载数据以确保一致性
       await loadData();
     } catch (error) {
       console.error('Error switching household:', error);
@@ -271,17 +333,6 @@ export default function ManagementScreen() {
     },
   ];
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <StatusBar style="dark" />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#6C5CE7" />
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
@@ -289,9 +340,9 @@ export default function ManagementScreen() {
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         {/* Personal Information Section */}
         <Text style={styles.sectionTag}>Personal Information</Text>
-        <View style={[styles.householdInfoCard, styles.personalInfoCard, { marginBottom: 16 }]}>
+        <View style={[styles.householdInfoCard, styles.personalInfoCard, { marginBottom: 10 }]}>
           <View style={styles.cardHeader}>
-            <Ionicons name="person-outline" size={24} color="#6C5CE7" />
+            <Ionicons name="person-outline" size={20} color="#6C5CE7" />
             {editingPersonal ? (
               <View style={styles.editContainer}>
                 <TextInput
@@ -326,22 +377,37 @@ export default function ManagementScreen() {
               <View style={styles.viewContainer}>
                 <View style={styles.viewContent}>
                   <View style={styles.nameRow}>
-                    <Text style={styles.householdName}>{user?.name || user?.email || 'N/A'}</Text>
-                    <TouchableOpacity
-                      style={styles.editButton}
-                      onPress={() => setEditingPersonal(true)}
-                    >
-                      <Ionicons name="create-outline" size={18} color="#6C5CE7" />
-                    </TouchableOpacity>
+                    {loading && !user ? (
+                      <View style={styles.loadingPlaceholder}>
+                        <ActivityIndicator size="small" color="#95A5A6" />
+                        <Text style={styles.placeholderText}>Loading...</Text>
+                      </View>
+                    ) : (
+                      <>
+                        <Text style={styles.householdName}>{user?.name || user?.email || 'N/A'}</Text>
+                        <TouchableOpacity
+                          style={styles.editButton}
+                          onPress={() => setEditingPersonal(true)}
+                        >
+                          <Ionicons name="create-outline" size={18} color="#6C5CE7" />
+                        </TouchableOpacity>
+                      </>
+                    )}
                   </View>
-                  {user?.email && (
+                  {loading && !user ? (
                     <View style={styles.addressRow}>
-                      <Ionicons name="mail-outline" size={14} color="#636E72" style={styles.addressIcon} />
-                      <Text style={styles.householdAddress}>{user.email}</Text>
+                      <View style={{ width: 14, height: 14, marginTop: 2 }} />
+                      <Text style={styles.householdAddressPlaceholder}>Loading...</Text>
                     </View>
-                  )}
-                  {!user?.email && (
-                    <Text style={styles.householdAddressPlaceholder}>No email set</Text>
+                  ) : (
+                    user?.email ? (
+                      <View style={styles.addressRow}>
+                        <Ionicons name="mail-outline" size={14} color="#636E72" style={styles.addressIcon} />
+                        <Text style={styles.householdAddress}>{user.email}</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.householdAddressPlaceholder}>No email set</Text>
+                    )
                   )}
                 </View>
               </View>
@@ -353,7 +419,7 @@ export default function ManagementScreen() {
         <Text style={styles.sectionTag}>Household Information</Text>
         <View style={styles.householdInfoCard}>
           <View style={styles.cardHeader}>
-            <Ionicons name="home-outline" size={24} color="#6C5CE7" />
+            <Ionicons name="home-outline" size={20} color="#6C5CE7" />
             {editing ? (
               <View style={styles.editContainer}>
                 <TextInput
@@ -397,22 +463,37 @@ export default function ManagementScreen() {
               <View style={styles.viewContainer}>
                 <View style={styles.viewContent}>
                   <View style={styles.nameRow}>
-                    <Text style={styles.householdName}>{household?.name || 'N/A'}</Text>
-                    <TouchableOpacity
-                      style={styles.editButton}
-                      onPress={() => setEditing(true)}
-                    >
-                      <Ionicons name="create-outline" size={18} color="#6C5CE7" />
-                    </TouchableOpacity>
+                    {loading && !household ? (
+                      <View style={styles.loadingPlaceholder}>
+                        <ActivityIndicator size="small" color="#95A5A6" />
+                        <Text style={styles.placeholderText}>Loading...</Text>
+                      </View>
+                    ) : (
+                      <>
+                        <Text style={styles.householdName}>{household?.name || 'N/A'}</Text>
+                        <TouchableOpacity
+                          style={styles.editButton}
+                          onPress={() => setEditing(true)}
+                        >
+                          <Ionicons name="create-outline" size={18} color="#6C5CE7" />
+                        </TouchableOpacity>
+                      </>
+                    )}
                   </View>
-                  {household?.address && (
+                  {loading && !household ? (
                     <View style={styles.addressRow}>
-                      <Ionicons name="location-outline" size={14} color="#636E72" style={styles.addressIcon} />
-                      <Text style={styles.householdAddress}>{household.address}</Text>
+                      <View style={{ width: 14, height: 14, marginTop: 2 }} />
+                      <Text style={styles.householdAddressPlaceholder}>Loading...</Text>
                     </View>
-                  )}
-                  {!household?.address && (
-                    <Text style={styles.householdAddressPlaceholder}>No address set</Text>
+                  ) : (
+                    household?.address ? (
+                      <View style={styles.addressRow}>
+                        <Ionicons name="location-outline" size={14} color="#636E72" style={styles.addressIcon} />
+                        <Text style={styles.householdAddress}>{household.address}</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.householdAddressPlaceholder}>No address set</Text>
+                    )
                   )}
                 </View>
               </View>
@@ -615,10 +696,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8F9FA',
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  loadingPlaceholder: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    height: 20, // 固定高度匹配householdName的行高
+  },
+  placeholderText: {
+    fontSize: 15,
+    color: '#95A5A6',
+    fontStyle: 'italic',
+    lineHeight: 20, // 匹配householdName的lineHeight
   },
   header: {
     flexDirection: 'row',
@@ -650,21 +739,21 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 12,
     paddingBottom: 80,
   },
   sectionTag: {
     fontSize: 14,
     fontWeight: '600',
     color: '#636E72',
-    marginBottom: 8,
-    marginTop: 8,
+    marginBottom: 6,
+    marginTop: 6,
   },
   householdInfoCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     marginBottom: 0,
     marginLeft: 0,
     borderWidth: 1,
@@ -685,52 +774,58 @@ const styles = StyleSheet.create({
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 16,
+    gap: 12,
   },
   viewContainer: {
     flex: 1,
   },
   viewContent: {
     flex: 1,
+    minHeight: 44, // 固定最小高度：nameRow (24) + addressRow (20) = 44
   },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   chevronIcon: {
     marginLeft: 8,
   },
   householdName: {
-    fontSize: 17,
+    fontSize: 16,
     color: '#2D3436',
     fontWeight: '600',
     flex: 1,
+    lineHeight: 20, // 固定行高，确保高度一致
   },
   addressRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 6,
+    marginTop: 0,
+    minHeight: 20, // 固定最小高度匹配householdAddress的lineHeight
   },
   addressIcon: {
     marginTop: 2,
   },
   householdAddress: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 14,
     color: '#636E72',
-    lineHeight: 22,
+    lineHeight: 20,
   },
   householdAddressPlaceholder: {
     fontSize: 14,
     color: '#95A5A6',
     fontStyle: 'italic',
+    lineHeight: 20, // 匹配householdAddress的lineHeight
+    minHeight: 20, // 固定最小高度
   },
   editButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
   },

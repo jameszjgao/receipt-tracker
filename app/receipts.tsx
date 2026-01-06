@@ -232,9 +232,17 @@ export default function ReceiptsScreen() {
           onPress: async () => {
               try {
               await deleteReceipt(receiptId);
-                loadReceipts();
+              // 乐观更新：直接从列表中移除，不需要重新加载所有小票
+              setReceipts(prev => prev.filter(r => r.id !== receiptId));
+              setSelectedIds(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(receiptId);
+                return newSet;
+              });
               } catch (error) {
               Alert.alert('Error', 'Failed to delete receipt');
+              // 如果失败，重新加载以确保数据一致
+              loadReceipts();
               }
           },
         },
@@ -257,10 +265,13 @@ export default function ReceiptsScreen() {
             try {
               const deletePromises = Array.from(selectedIds).map(id => deleteReceipt(id));
               await Promise.all(deletePromises);
+              // 乐观更新：直接从列表中移除，不需要重新加载所有小票
+              const idsToDelete = Array.from(selectedIds);
+              setReceipts(prev => prev.filter(r => !idsToDelete.includes(r.id)));
               setSelectedIds(new Set());
-              loadReceipts();
             } catch (error) {
               Alert.alert('Error', 'Failed to delete some receipts');
+              // 如果失败，重新加载以确保数据一致
               loadReceipts();
             }
           },

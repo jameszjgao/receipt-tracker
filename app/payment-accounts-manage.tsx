@@ -56,14 +56,17 @@ export default function PaymentAccountsManageScreen() {
     }
 
     try {
-      await createPaymentAccount(newName.trim(), false);
-      await loadAccounts();
+      const newAccount = await createPaymentAccount(newName.trim(), false);
+      // 乐观更新：直接添加到列表中，不需要重新加载所有账户
+      setAccounts(prev => [...prev, newAccount]);
       setNewName('');
       setShowAddForm(false);
       Alert.alert('Success', 'Payment account created');
     } catch (error: any) {
       console.error('Error creating payment account:', error);
       Alert.alert('Error', error.message || 'Failed to create payment account');
+      // 如果失败，重新加载以确保数据一致
+      loadAccounts();
     }
   };
 
@@ -77,13 +80,20 @@ export default function PaymentAccountsManageScreen() {
       await updatePaymentAccount(accountId, {
         name: editName.trim(),
       });
-      await loadAccounts();
+      // 乐观更新：直接更新列表中的账户，不需要重新加载所有账户
+      setAccounts(prev => prev.map(acc => 
+        acc.id === accountId 
+          ? { ...acc, name: editName.trim() }
+          : acc
+      ));
       setEditingId(null);
       setEditName('');
-      Alert.alert('Success', 'Payment account updated');
+      // 移除成功提示对话框
     } catch (error: any) {
       console.error('Error updating payment account:', error);
       Alert.alert('Error', error.message || 'Failed to update payment account');
+      // 如果失败，重新加载以确保数据一致
+      loadAccounts();
     }
   };
 
@@ -99,11 +109,14 @@ export default function PaymentAccountsManageScreen() {
           onPress: async () => {
             try {
               await deletePaymentAccount(account.id);
-              await loadAccounts();
+              // 乐观更新：直接从列表中移除，不需要重新加载所有账户
+              setAccounts(prev => prev.filter(acc => acc.id !== account.id));
               Alert.alert('Success', 'Payment account deleted');
             } catch (error: any) {
               console.error('Error deleting payment account:', error);
               Alert.alert('Error', error.message || 'Failed to delete payment account');
+              // 如果失败，重新加载以确保数据一致
+              loadAccounts();
             }
           },
         },

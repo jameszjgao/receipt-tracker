@@ -29,7 +29,7 @@ const COLOR_OPTIONS = [
 export default function CategoriesManageScreen() {
   const router = useRouter();
   const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editColor, setEditColor] = useState('#95A5A6');
@@ -61,8 +61,9 @@ export default function CategoriesManageScreen() {
     }
 
     try {
-      await createCategory(newName.trim(), newColor);
-      await loadCategories();
+      const newCategory = await createCategory(newName.trim(), newColor);
+      // 乐观更新：直接添加到列表中，不需要重新加载所有分类
+      setCategories(prev => [...prev, newCategory]);
       setNewName('');
       setNewColor('#95A5A6');
       setShowAddForm(false);
@@ -70,6 +71,8 @@ export default function CategoriesManageScreen() {
     } catch (error: any) {
       console.error('Error creating category:', error);
       Alert.alert('Error', error.message || 'Failed to create category');
+      // 如果失败，重新加载以确保数据一致
+      loadCategories();
     }
   };
 
@@ -84,14 +87,21 @@ export default function CategoriesManageScreen() {
         name: editName.trim(),
         color: editColor,
       });
-      await loadCategories();
+      // 乐观更新：直接更新列表中的分类，不需要重新加载所有分类
+      setCategories(prev => prev.map(cat => 
+        cat.id === categoryId 
+          ? { ...cat, name: editName.trim(), color: editColor }
+          : cat
+      ));
       setEditingId(null);
       setEditName('');
       setEditColor('#95A5A6');
-      Alert.alert('Success', 'Category updated');
+      // 移除成功提示对话框
     } catch (error: any) {
       console.error('Error updating category:', error);
       Alert.alert('Error', error.message || 'Failed to update category');
+      // 如果失败，重新加载以确保数据一致
+      loadCategories();
     }
   };
 
@@ -107,11 +117,14 @@ export default function CategoriesManageScreen() {
           onPress: async () => {
             try {
               await deleteCategory(category.id);
-              await loadCategories();
+              // 乐观更新：直接从列表中移除，不需要重新加载所有分类
+              setCategories(prev => prev.filter(cat => cat.id !== category.id));
               Alert.alert('Success', 'Category deleted');
             } catch (error: any) {
               console.error('Error deleting category:', error);
               Alert.alert('Error', error.message || 'Failed to delete category');
+              // 如果失败，重新加载以确保数据一致
+              loadCategories();
             }
           },
         },
@@ -130,17 +143,6 @@ export default function CategoriesManageScreen() {
     setEditName('');
     setEditColor('#95A5A6');
   };
-
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <StatusBar style="dark" />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#6C5CE7" />
-        </View>
-      </View>
-    );
-  }
 
   return (
     <View style={styles.container}>

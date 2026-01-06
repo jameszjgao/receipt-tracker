@@ -7,6 +7,12 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -15,21 +21,103 @@ import { getHouseholdMembers, HouseholdMember } from '@/lib/household-members';
 import { getCurrentUser, getCurrentHousehold } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
+import { createInvitation, getHouseholdInvitations, cancelInvitation, HouseholdInvitation } from '@/lib/household-invitations';
 
 export default function HouseholdMembersScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<HouseholdMember[]>([]);
+  const [pendingInvitations, setPendingInvitations] = useState<HouseholdInvitation[]>([]);
+  const [declinedInvitations, setDeclinedInvitations] = useState<HouseholdInvitation[]>([]);
+  const [cancelledInvitations, setCancelledInvitations] = useState<HouseholdInvitation[]>([]);
+  const [removedInvitations, setRemovedInvitations] = useState<HouseholdInvitation[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isCurrentUserAdmin, setIsCurrentUserAdmin] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
     loadMembers();
   }, []);
 
-  const loadMembers = async () => {
+  // 加载并分类邀请列表的通用函数
+  const loadAndClassifyInvitations = async (user: any, householdId: string) => {
+    const invitations = await getHouseholdInvitations(householdId);
+    
+    // 获取当前家庭的所有成员邮箱
+    const { data: existingMembers } = await supabase
+      .from('user_households')
+      .select('user_id')
+      .eq('household_id', householdId);
+    
+    const existingUserIds = new Set(existingMembers?.map(m => m.user_id) || []);
+    
+    // 获取用户邮箱映射
+    let userEmailMap = new Map<string, string>();
+    if (existingUserIds.size > 0) {
+      const { data: users } = await supabase
+        .from('users')
+        .select('email, id')
+        .in('id', Array.from(existingUserIds));
+      
+      users?.forEach(u => {
+        userEmailMap.set(u.email.toLowerCase(), u.id);
+      });
+    }
+    
+    // 先按email去重，每个email只保留最新的邀请记录
+    const emailToLatestInvitation = new Map<string, HouseholdInvitation>();
+    invitations.forEach(inv => {
+      const email = inv.inviteeEmail.toLowerCase();
+      const existing = emailToLatestInvitation.get(email);
+      if (!existing || new Date(inv.createdAt) > new Date(existing.createdAt)) {
+        emailToLatestInvitation.set(email, inv);
+      }
+    });
+    
+    // 分类邀请
+    const pending: HouseholdInvitation[] = [];
+    const declined: HouseholdInvitation[] = [];
+    const cancelled: HouseholdInvitation[] = [];
+    const removed: HouseholdInvitation[] = [];
+    
+    emailToLatestInvitation.forEach(inv => {
+      const inviteeEmail = inv.inviteeEmail.toLowerCase();
+      const userId = userEmailMap.get(inviteeEmail);
+      const isMember = userId && existingUserIds.has(userId);
+      
+      if (inv.status === 'pending') {
+        // 如果用户已经是成员，不显示pending邀请
+        if (!isMember) {
+          pending.push(inv);
+        }
+      } else if (inv.status === 'cancelled') {
+        if (inv.inviterId === user.id) {
+          // 管理员撤销的
+          cancelled.push(inv);
+        } else {
+          // 用户拒绝的
+          declined.push(inv);
+        }
+      } else if (inv.status === 'accepted') {
+        if (!isMember) {
+          // 已接受但不在成员列表中，说明被移除了
+          removed.push(inv);
+        }
+        // 如果isMember为true，说明用户还在，不显示在邀请列表中
+      }
+    });
+    
+    setPendingInvitations(pending);
+    setDeclinedInvitations(declined);
+    setCancelledInvitations(cancelled);
+    setRemovedInvitations(removed);
+  };
+
+  // 只加载成员列表
+  const loadMembersOnly = async () => {
     try {
-      setLoading(true);
       const user = await getCurrentUser();
       if (user) {
         setCurrentUserId(user.id);
@@ -39,7 +127,45 @@ export default function HouseholdMembersScreen() {
       
       // 检查当前用户是否是管理员
       const currentUserMember = data.find(m => m.userId === user?.id);
-      setIsCurrentUserAdmin(currentUserMember?.isAdmin || false);
+      const isAdmin = currentUserMember?.isAdmin || false;
+      setIsCurrentUserAdmin(isAdmin);
+      
+      return { user, isAdmin };
+    } catch (error) {
+      console.error('Error loading household members:', error);
+      throw error;
+    }
+  };
+
+  // 只加载邀请列表
+  const loadInvitationsOnly = async () => {
+    try {
+      const user = await getCurrentUser();
+      if (!user) return;
+      
+      const householdId = user.currentHouseholdId || user.householdId;
+      if (!householdId) return;
+      
+      await loadAndClassifyInvitations(user, householdId);
+    } catch (error) {
+      console.error('Error loading invitations:', error);
+      // 不显示错误提示，因为这是增量更新
+    }
+  };
+
+  // 加载所有数据（初始加载使用）
+  const loadMembers = async () => {
+    try {
+      setLoading(true);
+      const { user, isAdmin } = await loadMembersOnly();
+      
+      // 如果是管理员，加载邀请列表
+      if (isAdmin && user) {
+        const householdId = user.currentHouseholdId || user.householdId;
+        if (householdId) {
+          await loadAndClassifyInvitations(user, householdId);
+        }
+      }
     } catch (error) {
       console.error('Error loading household members:', error);
       Alert.alert('Error', 'Failed to load household members');
@@ -97,16 +223,112 @@ export default function HouseholdMembersScreen() {
     return emailPrefix || 'Unknown';
   };
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <StatusBar style="dark" />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#6C5CE7" />
-        </View>
-      </View>
+  const handleCancelInvitation = (invitationId: string) => {
+    Alert.alert(
+      'Cancel Invitation',
+      'Are you sure you want to cancel this invitation?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: () => {
+            (async () => {
+              try {
+                console.log('Cancelling invitation:', invitationId);
+                const { error } = await cancelInvitation(invitationId);
+                if (error) {
+                  console.error('Cancel invitation error:', error);
+                  Alert.alert('Error', error.message || 'Failed to cancel invitation');
+                } else {
+                  console.log('Invitation cancelled successfully, updating invitations...');
+                  loadInvitationsOnly(); // 只更新邀请列表
+                }
+              } catch (error) {
+                console.error('Error cancelling invitation:', error);
+                Alert.alert('Error', 'Failed to cancel invitation');
+              }
+            })();
+          },
+        },
+      ]
     );
-  }
+  };
+
+  const handleReinvite = async (email: string) => {
+    setInviteEmail(email);
+    setShowInviteModal(true);
+  };
+
+  const handleInvite = () => {
+    setInviteEmail('');
+    setShowInviteModal(true);
+  };
+
+  const handleSendInvitation = async () => {
+    if (!inviteEmail.trim()) {
+      Alert.alert('Error', 'Please enter an email address');
+      return;
+    }
+
+    // 简单的邮箱验证
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(inviteEmail.trim())) {
+      Alert.alert('Error', 'Please enter a valid email address');
+      return;
+    }
+
+    setInviting(true);
+    const { invitation, error } = await createInvitation(inviteEmail.trim());
+    setInviting(false);
+
+    if (error) {
+      Alert.alert('Error', error.message || 'Failed to send invitation');
+    } else {
+      Alert.alert('Success', 'Invitation sent successfully!', [
+        { text: 'OK', onPress: () => {
+          setShowInviteModal(false);
+          setInviteEmail('');
+          loadInvitationsOnly(); // 只更新邀请列表
+        }},
+      ]);
+    }
+  };
+
+  const handleRemoveMember = async (member: HouseholdMember) => {
+    Alert.alert(
+      'Remove Member',
+      `Are you sure you want to remove ${getDisplayName(member)} from this household?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const user = await getCurrentUser();
+              if (!user) return;
+              
+              const householdId = user.currentHouseholdId || user.householdId;
+              const { error } = await supabase
+                .from('user_households')
+                .delete()
+                .eq('user_id', member.userId)
+                .eq('household_id', householdId);
+
+              if (error) throw error;
+              // 移除成员后，需要重新加载成员列表和邀请列表
+              await loadMembersOnly();
+              await loadInvitationsOnly();
+            } catch (error) {
+              console.error('Error removing member:', error);
+              Alert.alert('Error', 'Failed to remove member');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -128,66 +350,260 @@ export default function HouseholdMembersScreen() {
         {isCurrentUserAdmin && (
           <TouchableOpacity
             style={styles.inviteButton}
-            onPress={() => {
-              // TODO: 实现邀请功能
-              Alert.alert('Coming Soon', 'Invite feature will be available soon');
-            }}
+            onPress={handleInvite}
           >
             <Ionicons name="person-add-outline" size={20} color="#6C5CE7" />
             <Text style={styles.inviteButtonText}>Invite Member</Text>
           </TouchableOpacity>
         )}
         
-        {members.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="people-outline" size={60} color="#95A5A6" />
-            <Text style={styles.emptyStateText}>No Members</Text>
-            <Text style={styles.emptyStateSubtext}>Members will appear here</Text>
-          </View>
-        ) : (
-          <View style={styles.membersList}>
-            {members.map((member) => {
-              const isCurrentUser = member.userId === currentUserId;
-              return (
-                <View key={member.userId} style={styles.memberCard}>
-                  <View style={styles.memberHeader}>
-                    <View style={styles.memberInfo}>
-                      <View style={styles.memberNameRow}>
-                        <Text style={styles.memberName}>{getDisplayName(member)}</Text>
+        {/* 成员组：自己和已加入成员 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Members</Text>
+          {loading ? (
+            <View style={styles.compactList}>
+              <View style={[styles.compactItem, styles.compactItemLast]}>
+                <View style={styles.compactItemContent}>
+                  <View style={styles.compactNameEmail}>
+                    <View style={styles.loadingPlaceholder}>
+                      <ActivityIndicator size="small" color="#6C5CE7" />
+                      <Text style={styles.compactName}>Loading...</Text>
+                    </View>
+                    <View style={[styles.loadingPlaceholder, { width: 150 }]}>
+                      <Text style={styles.compactEmail}>Loading...</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            </View>
+          ) : members.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="people-outline" size={40} color="#95A5A6" />
+              <Text style={styles.emptyStateText}>No Members</Text>
+            </View>
+          ) : (
+            <View style={styles.compactList}>
+              {members.map((member, index) => {
+                const isCurrentUser = member.userId === currentUserId;
+                const isLast = index === members.length - 1;
+                return (
+                  <View key={member.userId} style={[styles.compactItem, isLast && styles.compactItemLast]}>
+                    <View style={styles.compactItemContent}>
+                      <View style={styles.compactNameEmail}>
+                        <Text style={styles.compactName}>{getDisplayName(member)}</Text>
+                        <Text style={styles.compactEmail}>{member.email}</Text>
+                      </View>
+                      <View style={styles.compactBadges}>
                         {isCurrentUser && (
-                          <View style={styles.currentUserBadge}>
-                            <Text style={styles.currentUserBadgeText}>You</Text>
+                          <View style={styles.compactBadge}>
+                            <Text style={styles.compactBadgeText}>You</Text>
                           </View>
                         )}
                         {member.isAdmin && (
-                          <View style={styles.adminBadge}>
-                            <Text style={styles.adminBadgeText}>Admin</Text>
+                          <View style={[styles.compactBadge, styles.adminBadgeCompact]}>
+                            <Text style={[styles.compactBadgeText, styles.adminBadgeTextCompact]}>Admin</Text>
                           </View>
                         )}
                       </View>
-                      <Text style={styles.memberEmail}>{member.email}</Text>
                     </View>
                     {isCurrentUserAdmin && !isCurrentUser && (
                       <TouchableOpacity
-                        style={styles.removeButton}
+                        style={styles.compactRemoveButton}
                         onPress={() => handleRemoveMember(member)}
                       >
-                        <Ionicons name="close-circle-outline" size={24} color="#E74C3C" />
+                        <Ionicons name="trash-outline" size={20} color="#E74C3C" />
                       </TouchableOpacity>
                     )}
                   </View>
-                  <View style={styles.memberFooter}>
-                    <Ionicons name="time-outline" size={14} color="#95A5A6" />
-                    <Text style={styles.lastSignInText}>
-                      Last sign in: {formatDateShort(member.lastSignInAt)}
-                    </Text>
+                );
+              })}
+            </View>
+          )}
+        </View>
+
+        {/* 管理员看到的邀请组：待同意、已拒绝、已撤回、已移除 */}
+        {isCurrentUserAdmin && (pendingInvitations.length > 0 || declinedInvitations.length > 0 || cancelledInvitations.length > 0 || removedInvitations.length > 0) && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Invitations</Text>
+            <View style={styles.compactList}>
+              {/* 待同意邀请 */}
+              {pendingInvitations.map((invitation, index) => {
+                const totalPending = pendingInvitations.length;
+                const totalDeclined = declinedInvitations.length;
+                const totalCancelled = cancelledInvitations.length;
+                const totalRemoved = removedInvitations.length;
+                const isLast = index === totalPending - 1 && totalDeclined === 0 && totalCancelled === 0 && totalRemoved === 0;
+                return (
+                <View key={invitation.id} style={[styles.compactItem, isLast && styles.compactItemLast]}>
+                  <View style={styles.compactItemContent}>
+                    <Text style={styles.compactEmail}>{invitation.inviteeEmail}</Text>
+                    <View style={styles.compactBadges}>
+                      <View style={[styles.compactBadge, styles.pendingBadge]}>
+                        <Text style={[styles.compactBadgeText, styles.pendingBadgeText]}>Pending</Text>
+                      </View>
+                    </View>
                   </View>
+                  <TouchableOpacity
+                    style={styles.compactActionButton}
+                    onPress={() => handleCancelInvitation(invitation.id)}
+                  >
+                    <Ionicons name="close-circle-outline" size={20} color="#636E72" />
+                  </TouchableOpacity>
                 </View>
-              );
-            })}
+                );
+              })}
+              {/* 已拒绝邀请 */}
+              {declinedInvitations.map((invitation, index) => {
+                const totalDeclined = declinedInvitations.length;
+                const totalCancelled = cancelledInvitations.length;
+                const totalRemoved = removedInvitations.length;
+                const isLast = index === totalDeclined - 1 && totalCancelled === 0 && totalRemoved === 0;
+                return (
+                <View key={invitation.id} style={[styles.compactItem, styles.cancelledItem, isLast && styles.compactItemLast]}>
+                  <View style={styles.compactItemContent}>
+                    <Text style={[styles.compactEmail, styles.cancelledText]}>{invitation.inviteeEmail}</Text>
+                    <View style={styles.compactBadges}>
+                      <View style={[styles.compactBadge, styles.declinedBadge]}>
+                        <Text style={[styles.compactBadgeText, styles.declinedBadgeText]}>Declined</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.compactActionButton}
+                    onPress={() => handleReinvite(invitation.inviteeEmail)}
+                  >
+                    <Ionicons name="mail-outline" size={20} color="#6C5CE7" />
+                  </TouchableOpacity>
+                </View>
+                );
+              })}
+              {/* 已撤回邀请 */}
+              {cancelledInvitations.map((invitation, index) => {
+                const totalCancelled = cancelledInvitations.length;
+                const totalRemoved = removedInvitations.length;
+                const isLast = index === totalCancelled - 1 && totalRemoved === 0;
+                return (
+                <View key={invitation.id} style={[styles.compactItem, styles.cancelledItem, isLast && styles.compactItemLast]}>
+                  <View style={styles.compactItemContent}>
+                    <Text style={[styles.compactEmail, styles.cancelledText]}>{invitation.inviteeEmail}</Text>
+                    <View style={styles.compactBadges}>
+                      <View style={[styles.compactBadge, styles.cancelledBadge]}>
+                        <Text style={[styles.compactBadgeText, styles.cancelledBadgeText]}>Cancelled</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.compactActionButton}
+                    onPress={() => handleReinvite(invitation.inviteeEmail)}
+                  >
+                    <Ionicons name="mail-outline" size={20} color="#6C5CE7" />
+                  </TouchableOpacity>
+                </View>
+                );
+              })}
+              {/* 已移除邀请 */}
+              {removedInvitations.map((invitation, index) => {
+                const isLast = index === removedInvitations.length - 1;
+                return (
+                <View key={invitation.id} style={[styles.compactItem, styles.cancelledItem, isLast && styles.compactItemLast]}>
+                  <View style={styles.compactItemContent}>
+                    <Text style={[styles.compactEmail, styles.cancelledText]}>{invitation.inviteeEmail}</Text>
+                    <View style={styles.compactBadges}>
+                      <View style={[styles.compactBadge, styles.removedBadge]}>
+                        <Text style={[styles.compactBadgeText, styles.removedBadgeText]}>Removed</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.compactActionButton}
+                    onPress={() => handleReinvite(invitation.inviteeEmail)}
+                  >
+                    <Ionicons name="mail-outline" size={20} color="#6C5CE7" />
+                  </TouchableOpacity>
+                </View>
+                );
+              })}
+            </View>
           </View>
         )}
       </ScrollView>
+
+      {/* 邀请对话框 */}
+      <Modal
+        visible={showInviteModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowInviteModal(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalOverlayContent}>
+              <TouchableWithoutFeedback>
+                <View style={styles.modalContent}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>Invite Member</Text>
+                    <TouchableOpacity
+                      onPress={() => setShowInviteModal(false)}
+                      style={styles.modalCloseButton}
+                    >
+                      <Ionicons name="close" size={24} color="#636E72" />
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={styles.modalScrollContent}
+                  >
+                    <Text style={styles.modalSubtitle}>
+                      Enter the email address of the person you want to invite
+                    </Text>
+                    <View style={styles.modalInputContainer}>
+                      <Ionicons name="mail-outline" size={20} color="#636E72" style={styles.modalInputIcon} />
+                      <TextInput
+                        style={styles.modalInput}
+                        placeholder="Email address"
+                        placeholderTextColor="#95A5A6"
+                        value={inviteEmail}
+                        onChangeText={setInviteEmail}
+                        autoCapitalize="none"
+                        keyboardType="email-address"
+                        autoComplete="email"
+                        editable={!inviting}
+                      />
+                    </View>
+                  </ScrollView>
+                  <View style={styles.modalButtons}>
+                    <TouchableOpacity
+                      style={[styles.modalButton, styles.modalButtonCancel]}
+                      onPress={() => {
+                        setShowInviteModal(false);
+                        setInviteEmail('');
+                      }}
+                      disabled={inviting}
+                    >
+                      <Text style={styles.modalButtonCancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.modalButton, styles.modalButtonSend, inviting && styles.modalButtonDisabled]}
+                      onPress={handleSendInvitation}
+                      disabled={inviting}
+                    >
+                      {inviting ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={styles.modalButtonSendText}>Send Invitation</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -250,8 +666,175 @@ const styles = StyleSheet.create({
     color: '#636E72',
     marginTop: 8,
   },
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2D3436',
+    marginBottom: 12,
+  },
+  compactList: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+    overflow: 'hidden',
+  },
+  compactItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  compactItemLast: {
+    borderBottomWidth: 0,
+  },
+  cancelledItem: {
+    opacity: 0.7,
+    backgroundColor: '#F8F9FA',
+  },
+  compactItemContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  compactNameEmail: {
+    flex: 1,
+    marginRight: 12,
+  },
+  compactName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#2D3436',
+    marginBottom: 2,
+  },
+  compactEmail: {
+    fontSize: 13,
+    color: '#636E72',
+  },
+  loadingPlaceholder: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 2,
+  },
+  compactBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginLeft: 12,
+  },
+  compactBadge: {
+    backgroundColor: '#F0F4FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  compactBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#6C5CE7',
+  },
+  adminBadgeCompact: {
+    backgroundColor: '#FFF3E0',
+  },
+  adminBadgeTextCompact: {
+    color: '#FF9800',
+  },
+  pendingBadge: {
+    backgroundColor: '#E8F5E9',
+  },
+  pendingBadgeText: {
+    color: '#4CAF50',
+  },
+  declinedBadge: {
+    backgroundColor: '#F5F5F5',
+  },
+  declinedBadgeText: {
+    color: '#95A5A6',
+  },
+  cancelledBadge: {
+    backgroundColor: '#FFF3E0',
+  },
+  cancelledBadgeText: {
+    color: '#FF9800',
+  },
+  removedBadge: {
+    backgroundColor: '#FFEBEE',
+  },
+  removedBadgeText: {
+    color: '#E74C3C',
+  },
+  compactRemoveButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  compactActionButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
   membersList: {
     gap: 12,
+  },
+  invitationsList: {
+    gap: 12,
+  },
+  invitationCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+  },
+  cancelledInvitationCard: {
+    opacity: 0.7,
+    backgroundColor: '#F8F9FA',
+  },
+  invitationHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  invitationInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  invitationEmail: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2D3436',
+    marginBottom: 4,
+  },
+  invitationStatus: {
+    fontSize: 14,
+    color: '#6C5CE7',
+    fontWeight: '500',
+  },
+  invitationStatusCancelled: {
+    fontSize: 14,
+    color: '#95A5A6',
+    fontWeight: '500',
+  },
+  cancelledText: {
+    color: '#95A5A6',
+  },
+  invitationFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  invitationDate: {
+    fontSize: 13,
+    color: '#95A5A6',
   },
   inviteButton: {
     flexDirection: 'row',
@@ -270,72 +853,102 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#6C5CE7',
   },
-  memberCard: {
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalOverlayContent: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
     backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+  },
+  modalScrollContent: {
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2D3436',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#636E72',
+    marginBottom: 20,
+  },
+  modalInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8F9FA',
     borderRadius: 12,
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 24,
     borderWidth: 1,
     borderColor: '#E9ECEF',
   },
-  memberHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+  modalInputIcon: {
+    marginRight: 12,
   },
-  memberInfo: {
+  modalInput: {
     flex: 1,
-  },
-  memberNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-    gap: 8,
-  },
-  memberName: {
     fontSize: 16,
-    fontWeight: '600',
     color: '#2D3436',
+    paddingVertical: 0,
   },
-  currentUserBadge: {
-    backgroundColor: '#F0F4FF',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  currentUserBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#6C5CE7',
-  },
-  adminBadge: {
-    backgroundColor: '#FFF3E0',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  adminBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FF9800',
-  },
-  removeButton: {
-    padding: 4,
-  },
-  memberEmail: {
-    fontSize: 14,
-    color: '#636E72',
-  },
-  memberFooter: {
+  modalButtons: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingTop: 12,
+    gap: 12,
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+    paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#F0F0F0',
   },
-  lastSignInText: {
-    fontSize: 13,
-    color: '#95A5A6',
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  modalButtonCancel: {
+    backgroundColor: '#F8F9FA',
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+  },
+  modalButtonCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#636E72',
+  },
+  modalButtonSend: {
+    backgroundColor: '#6C5CE7',
+  },
+  modalButtonSendText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  modalButtonDisabled: {
+    opacity: 0.6,
   },
 });

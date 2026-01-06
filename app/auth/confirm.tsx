@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { supabase } from '@/lib/supabase';
+import { getCurrentUser } from '@/lib/auth';
 
 export default function EmailConfirmScreen() {
   const router = useRouter();
@@ -51,6 +52,48 @@ export default function EmailConfirmScreen() {
       }
 
       if (data?.user) {
+        // 邮箱确认成功，确保 users 表中有用户记录
+        try {
+          // 检查 users 表中是否存在该用户
+          const { data: existingUser } = await supabase
+            .from('users')
+            .select('id')
+            .eq('id', data.user.id)
+            .maybeSingle();
+          
+          // 如果不存在，创建用户记录
+          if (!existingUser) {
+            // 尝试从 user_metadata 中获取用户名（注册时通过 data 参数传递）
+            const userNameFromMetadata = data.user.user_metadata?.name;
+            const userName = userNameFromMetadata || data.user.email?.split('@')[0] || 'User';
+            
+            const { error: insertError } = await supabase
+              .from('users')
+              .insert({
+                id: data.user.id,
+                email: data.user.email || '',
+                name: userName,
+                current_household_id: null,
+              });
+            
+            if (insertError) {
+              console.error('Error creating user record after email confirmation:', insertError);
+              console.error('Error details:', {
+                code: insertError.code,
+                message: insertError.message,
+                details: insertError.details,
+                hint: insertError.hint,
+              });
+              // 即使创建失败，也继续流程（登录时会再次尝试创建）
+            } else {
+              console.log('User record created successfully after email confirmation');
+            }
+          }
+        } catch (error) {
+          console.error('Error ensuring user record exists:', error);
+          // 即使出错，也继续流程（登录时会再次尝试创建）
+        }
+        
         setStatus('success');
         setMessage('Email confirmed successfully! Redirecting to login...');
         // 等待 2 秒后跳转到登录页

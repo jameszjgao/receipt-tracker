@@ -61,8 +61,9 @@ export default function PurposesManageScreen() {
     }
 
     try {
-      await createPurpose(newName.trim(), newColor);
-      await loadPurposes();
+      const newPurpose = await createPurpose(newName.trim(), newColor);
+      // 乐观更新：直接添加到列表中，不需要重新加载所有用途
+      setPurposes(prev => [...prev, newPurpose]);
       setNewName('');
       setNewColor('#95A5A6');
       setShowAddForm(false);
@@ -70,6 +71,8 @@ export default function PurposesManageScreen() {
     } catch (error: any) {
       console.error('Error creating purpose:', error);
       Alert.alert('Error', error.message || 'Failed to create purpose');
+      // 如果失败，重新加载以确保数据一致
+      loadPurposes();
     }
   };
 
@@ -84,14 +87,21 @@ export default function PurposesManageScreen() {
         name: editName.trim(),
         color: editColor,
       });
-      await loadPurposes();
+      // 乐观更新：直接更新列表中的用途，不需要重新加载所有用途
+      setPurposes(prev => prev.map(p => 
+        p.id === purposeId 
+          ? { ...p, name: editName.trim(), color: editColor }
+          : p
+      ));
       setEditingId(null);
       setEditName('');
       setEditColor('#95A5A6');
-      Alert.alert('Success', 'Purpose updated');
+      // 移除成功提示对话框
     } catch (error: any) {
       console.error('Error updating purpose:', error);
       Alert.alert('Error', error.message || 'Failed to update purpose');
+      // 如果失败，重新加载以确保数据一致
+      loadPurposes();
     }
   };
 
@@ -107,11 +117,14 @@ export default function PurposesManageScreen() {
           onPress: async () => {
             try {
               await deletePurpose(purpose.id);
-              await loadPurposes();
+              // 乐观更新：直接从列表中移除，不需要重新加载所有用途
+              setPurposes(prev => prev.filter(p => p.id !== purpose.id));
               Alert.alert('Success', 'Purpose deleted');
             } catch (error: any) {
               console.error('Error deleting purpose:', error);
               Alert.alert('Error', error.message || 'Failed to delete purpose');
+              // 如果失败，重新加载以确保数据一致
+              loadPurposes();
             }
           },
         },

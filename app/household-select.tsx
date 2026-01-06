@@ -63,6 +63,12 @@ export default function HouseholdSelectScreen() {
         Alert.alert('Error', error.message);
         return;
       }
+      
+      // 更新缓存
+      const updatedUser = await getCurrentUser(true);
+      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
+      await initializeAuthCache(updatedUser, updatedHousehold);
+      
       router.replace('/');
     } catch (error) {
       console.error('Error selecting household:', error);
@@ -89,6 +95,10 @@ export default function HouseholdSelectScreen() {
       }
 
       if (household) {
+        // 更新缓存
+        const updatedUser = await getCurrentUser(true);
+        await initializeAuthCache(updatedUser, household);
+        
         setShowCreateModal(false);
         setNewHouseholdName('');
         setNewHouseholdAddress('');

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,17 +11,25 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { signIn } from '@/lib/auth';
+import { signIn, getCurrentUser, getCurrentHousehold } from '@/lib/auth';
+import { initializeAuthCache } from '@/lib/auth-cache';
 
 export default function LoginScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ inviteToken?: string; email?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const router = useRouter();
+
+  useEffect(() => {
+    if (params.email) {
+      setEmail(params.email);
+    }
+  }, [params]);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -36,10 +44,26 @@ export default function LoginScreen() {
     if (error) {
       Alert.alert('Login Failed', error.message);
     } else {
-      // 登录后跳转到首页，首页会检查家庭数量并决定跳转
+      // 登录成功后统一跳转到首页，由 index.tsx 统一处理邀请检查
+      // 数据将在后台异步加载，由目标页面处理
       router.replace('/');
+
+      // 在后台异步加载用户和家庭信息并初始化缓存（不阻塞跳转）
+      (async () => {
+        try {
+          const user = await getCurrentUser(true); // 强制刷新
+          const household = user ? await getCurrentHousehold(true) : null; // 强制刷新
+          
+          // 初始化缓存
+          await initializeAuthCache(user, household);
+        } catch (error) {
+          console.error('Error initializing auth cache in background:', error);
+          // 错误不影响登录流程，目标页面会处理
+        }
+      })();
     }
   };
+
 
   return (
     <KeyboardAvoidingView
@@ -76,6 +100,7 @@ export default function LoginScreen() {
                 autoCapitalize="none"
                 keyboardType="email-address"
                 autoComplete="email"
+                textContentType="emailAddress"
               />
             </View>
 
@@ -90,6 +115,7 @@ export default function LoginScreen() {
                 secureTextEntry={!showPassword}
                 autoCapitalize="none"
                 autoComplete="password"
+                textContentType="password"
               />
               <TouchableOpacity
                 onPress={() => setShowPassword(!showPassword)}
@@ -129,6 +155,7 @@ export default function LoginScreen() {
           </View>
         </View>
       </ScrollView>
+
     </KeyboardAvoidingView>
   );
 }

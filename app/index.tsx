@@ -1,19 +1,71 @@
 import { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, ActivityIndicator, Alert, ScrollView, TextInput } from 'react-native';
+import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { isAuthenticated, getCurrentUser, getCurrentHousehold } from '@/lib/auth';
-import { Household } from '@/types';
+import { isAuthenticated, getCurrentUser, getCurrentHousehold, setCurrentHousehold, getUserHouseholds, createHousehold } from '@/lib/auth';
+import { initializeAuthCache, isCacheInitialized } from '@/lib/auth-cache';
+import { Household, UserHousehold } from '@/types';
+import { getPendingInvitationsForUser } from '@/lib/household-invitations';
 
 export default function HomeScreen() {
   const router = useRouter();
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
-  const [currentHousehold, setCurrentHousehold] = useState<Household | null>(null);
+  const [currentHousehold, setCurrentHouseholdState] = useState<Household | null>(null);
+  const [showHouseholdSwitch, setShowHouseholdSwitch] = useState(false);
+  const [households, setHouseholds] = useState<UserHousehold[]>([]);
+  const [switching, setSwitching] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newHouseholdName, setNewHouseholdName] = useState('');
+  const [newHouseholdAddress, setNewHouseholdAddress] = useState('');
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     checkAuth();
   }, []);
+
+  const continueAfterAuth = async () => {
+    // 检查用户是否有当前家庭（使用缓存，如果缓存未初始化则从数据库读取）
+    const user = await getCurrentUser();
+    if (!user) {
+      router.replace('/setup-household');
+      return;
+    }
+
+    // 检查用户是否有家庭（区分新用户和老用户）
+    const { getUserHouseholds } = await import('@/lib/auth');
+    const households = await getUserHouseholds();
+    
+    // 新用户：没有家庭，跳转到设置家庭页面（创建家庭）
+    if (households.length === 0) {
+      router.replace('/setup-household');
+      return;
+    }
+
+    // 老用户：有家庭
+    // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用
+    if (user.currentHouseholdId || user.householdId) {
+      setIsLoggedIn(true);
+      return;
+    }
+
+    // 老用户：有家庭但没有当前家庭
+    if (households.length === 1) {
+      // 只有一个家庭，自动设置并进入
+      const { setCurrentHousehold } = await import('@/lib/auth');
+      await setCurrentHousehold(households[0].householdId);
+      // 更新缓存
+      const updatedUser = await getCurrentUser(true);
+      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
+      await initializeAuthCache(updatedUser, updatedHousehold);
+      setIsLoggedIn(true);
+      return;
+    } else {
+      // 多个家庭但没有当前家庭，跳转到家庭选择页面
+      router.replace('/household-select');
+      return;
+    }
+  };
 
   const checkAuth = async () => {
     const authenticated = await isAuthenticated();
@@ -22,13 +74,57 @@ export default function HomeScreen() {
       return;
     }
 
-    // 检查用户是否有当前家庭
-    const user = await getCurrentUser();
-    if (!user) {
-      router.replace('/household-select');
+    // 如果缓存未初始化，后台异步初始化缓存（不阻塞页面渲染）
+    if (!isCacheInitialized()) {
+      // 后台异步加载，不阻塞，同时先尝试继续路由检查
+      // 如果缓存加载完成前需要数据，会从数据库读取；完成后会使用缓存
+      (async () => {
+        try {
+          const user = await getCurrentUser(true); // 强制刷新
+          const household = user ? await getCurrentHousehold(true) : null; // 强制刷新
+          await initializeAuthCache(user, household);
+        } catch (error) {
+          console.error('Error initializing auth cache:', error);
+          // 错误不影响流程，目标页面会处理
+        }
+      })();
+      
+      // 不等待缓存加载，立即继续检查（会从数据库读取，但保证页面正常显示）
+      continueAuthCheck();
+    } else {
+      // 缓存已初始化，直接继续
+      continueAuthCheck();
+    }
+  };
+
+  const continueAuthCheck = async () => {
+    // 优先检查是否有待处理的邀请（在进入应用之前处理）
+    const invitations = await getPendingInvitationsForUser();
+    
+    if (invitations.length > 0) {
+      // 有邀请，跳转到设置家庭页面显示邀请对话框
+      router.replace('/setup-household');
       return;
     }
 
+    // 检查用户是否有当前家庭（使用缓存，如果缓存未初始化则从数据库读取）
+    const user = await getCurrentUser();
+    if (!user) {
+      router.replace('/setup-household');
+      return;
+    }
+
+    // 检查用户是否有家庭（区分新用户和老用户）
+    const { getUserHouseholds } = await import('@/lib/auth');
+    const households = await getUserHouseholds();
+    
+    // 新用户：没有家庭，跳转到设置家庭页面（创建家庭）
+    if (households.length === 0) {
+      router.replace('/setup-household');
+      return;
+    }
+
+    // 老用户：有家庭
     // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用
     // 这样可以快速登录，使用上次登录的家庭
     if (user.currentHouseholdId || user.householdId) {
@@ -36,26 +132,20 @@ export default function HomeScreen() {
       return;
     }
 
-    // 没有当前家庭，检查家庭数量
-    const { getUserHouseholds } = await import('@/lib/auth');
-    const households = await getUserHouseholds();
-    
-    if (households.length === 0) {
-      // 没有家庭，跳转到家庭选择页面（可以创建）
-      router.replace('/household-select');
-      return;
-    } else if (households.length === 1) {
+    // 老用户：有家庭但没有当前家庭
+    if (households.length === 1) {
       // 只有一个家庭，自动设置并进入
       const { setCurrentHousehold } = await import('@/lib/auth');
       await setCurrentHousehold(households[0].householdId);
+      // 更新缓存
+      const updatedUser = await getCurrentUser(true);
+      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
+      await initializeAuthCache(updatedUser, updatedHousehold);
       setIsLoggedIn(true);
       return;
     } else {
-      // 多个家庭但没有当前家庭，自动选择第一个家庭（最近加入的）
-      // 这样可以快速登录，而不需要用户选择
-      const { setCurrentHousehold } = await import('@/lib/auth');
-      await setCurrentHousehold(households[0].householdId);
-      setIsLoggedIn(true);
+      // 多个家庭但没有当前家庭，跳转到家庭选择页面
+      router.replace('/household-select');
       return;
     }
   };
@@ -66,20 +156,137 @@ export default function HomeScreen() {
     }
   }, [isLoggedIn]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (isLoggedIn) {
-        loadHousehold();
-      }
-    }, [isLoggedIn])
-  );
+  // 移除 useFocusEffect，数据已在登录时缓存，不需要每次获得焦点都重新加载
+  // useFocusEffect 已移除，避免重复从数据库读取
 
   const loadHousehold = async () => {
     try {
+      // 使用缓存，不需要强制刷新（除非数据被修改了）
       const household = await getCurrentHousehold();
-      setCurrentHousehold(household);
+      setCurrentHouseholdState(household);
+      
+      // 移除邀请检查逻辑，邀请已在 continueAuthCheck 中处理
+      // 避免进入 index 后再次显示邀请对话框
     } catch (error) {
       console.error('Error loading household:', error);
+    }
+  };
+
+
+  const ensureUserHasHousehold = async (isNewUser: boolean = false) => {
+    // 确保用户有当前家庭，如果没有则设置到第一个家庭或创建新家庭
+    const user = await getCurrentUser();
+    if (!user) return;
+
+    // 如果用户已经有当前家庭，不需要处理
+    if (user.currentHouseholdId || user.householdId) {
+      return;
+    }
+
+    // 检查用户有哪些家庭
+    const households = await getUserHouseholds();
+    if (households.length > 0) {
+      // 有家庭但没有当前家庭，设置到第一个家庭
+      const { error } = await setCurrentHousehold(households[0].householdId);
+      if (!error) {
+        // 更新缓存
+        const updatedUser = await getCurrentUser(true);
+        const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
+        await initializeAuthCache(updatedUser, updatedHousehold);
+        // 更新当前显示的家庭
+        setCurrentHouseholdState(updatedHousehold);
+      }
+    } else if (isNewUser) {
+      // 新用户没有家庭，跳转到创建家庭页面让用户手动创建
+      router.replace('/setup-household');
+      return;
+    } else {
+      // 老用户没有家庭的情况不应该发生，但如果有，也跳转到创建家庭页面
+      router.replace('/setup-household');
+    }
+  };
+
+
+  const loadHouseholds = async () => {
+    try {
+      const data = await getUserHouseholds();
+      setHouseholds(data);
+    } catch (error) {
+      console.error('Error loading households:', error);
+      Alert.alert('Error', 'Failed to load households');
+    }
+  };
+
+  const handleSwitchHousehold = async (householdId: string) => {
+    try {
+      setSwitching(true);
+      const { error } = await setCurrentHousehold(householdId);
+      if (error) {
+        Alert.alert('Error', error.message);
+        setSwitching(false);
+        return;
+      }
+
+      // 更新缓存
+      const updatedUser = await getCurrentUser(true);
+      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
+      await initializeAuthCache(updatedUser, updatedHousehold);
+
+      setShowHouseholdSwitch(false);
+      
+      // 更新本地状态
+      if (updatedHousehold) {
+        setCurrentHouseholdState(updatedHousehold);
+      }
+      
+      // 重新加载家庭信息
+      await loadHousehold();
+    } catch (error) {
+      console.error('Error switching household:', error);
+      Alert.alert('Error', 'Failed to switch household');
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  const openHouseholdSwitch = async () => {
+    await loadHouseholds();
+    setShowHouseholdSwitch(true);
+  };
+
+  const handleCreateHousehold = async () => {
+    if (!newHouseholdName.trim()) {
+      Alert.alert('Error', 'Please enter household name');
+      return;
+    }
+
+    try {
+      setCreating(true);
+      const { household, error } = await createHousehold(
+        newHouseholdName.trim(),
+        newHouseholdAddress.trim() || undefined
+      );
+
+      if (error) {
+        Alert.alert('Error', error.message || 'Failed to create household');
+        setCreating(false);
+        return;
+      }
+
+      if (household) {
+        setShowCreateModal(false);
+        setNewHouseholdName('');
+        setNewHouseholdAddress('');
+        await loadHouseholds();
+        await loadHousehold();
+        setShowHouseholdSwitch(false);
+        Alert.alert('Success', 'Household created successfully');
+      }
+    } catch (error) {
+      console.error('Error creating household:', error);
+      Alert.alert('Error', 'Failed to create household');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -88,6 +295,7 @@ export default function HomeScreen() {
       <View style={styles.container}>
         <StatusBar style="dark" />
         <View style={styles.content}>
+          <ActivityIndicator size="large" color="#6C5CE7" />
           <Text style={styles.title}>Loading...</Text>
         </View>
       </View>
@@ -95,7 +303,7 @@ export default function HomeScreen() {
   }
 
   if (!isLoggedIn) {
-    return null; // 会跳转到登录页
+    return null; // 会跳转到登录页或设置家庭页面
   }
 
   return (
@@ -105,9 +313,15 @@ export default function HomeScreen() {
       {/* 顶部栏：家庭名称和管理入口 */}
       <View style={styles.topBar}>
         <View style={styles.topBarLeft} />
-        <Text style={styles.householdName} numberOfLines={1}>
-          {currentHousehold?.name || 'Loading...'}
-        </Text>
+        <TouchableOpacity
+          style={styles.householdNameContainer}
+          onPress={openHouseholdSwitch}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.householdName} numberOfLines={1}>
+            {currentHousehold?.name || 'Loading...'}
+          </Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={styles.managementButton}
           onPress={() => router.push('/management')}
@@ -149,6 +363,153 @@ export default function HomeScreen() {
         <Ionicons name="list-outline" size={20} color="#6C5CE7" style={styles.buttonIcon} />
         <Text style={styles.secondaryButtonText}>View Receipts List</Text>
       </TouchableOpacity>
+
+      {/* Household Switch Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showHouseholdSwitch}
+        onRequestClose={() => setShowHouseholdSwitch(false)}
+      >
+        <TouchableOpacity
+          style={styles.pickerOverlay}
+          activeOpacity={1}
+          onPress={() => setShowHouseholdSwitch(false)}
+        >
+          <View style={styles.pickerBottomSheet} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHandle} />
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Switch Household</Text>
+            </View>
+            <ScrollView style={styles.pickerScrollView} showsVerticalScrollIndicator={false}>
+              {households.map((userHousehold) => (
+                <TouchableOpacity
+                  key={userHousehold.householdId}
+                  style={[
+                    styles.pickerOption,
+                    currentHousehold?.id === userHousehold.householdId && styles.pickerOptionSelected
+                  ]}
+                  onPress={() => handleSwitchHousehold(userHousehold.householdId)}
+                  disabled={switching || currentHousehold?.id === userHousehold.householdId}
+                >
+                  <Ionicons 
+                    name="home" 
+                    size={20} 
+                    color={currentHousehold?.id === userHousehold.householdId ? "#6C5CE7" : "#636E72"} 
+                  />
+                  <View style={styles.householdOptionContent}>
+                    <Text style={[
+                      styles.pickerOptionText,
+                      currentHousehold?.id === userHousehold.householdId && styles.pickerOptionTextSelected
+                    ]}>
+                      {userHousehold.household?.name || 'Unnamed Household'}
+                    </Text>
+                    {userHousehold.household?.address && (
+                      <Text style={styles.householdOptionAddress} numberOfLines={1}>
+                        {userHousehold.household.address}
+                      </Text>
+                    )}
+                  </View>
+                  {currentHousehold?.id === userHousehold.householdId && (
+                    <Ionicons name="checkmark" size={20} color="#6C5CE7" />
+                  )}
+                </TouchableOpacity>
+              ))}
+              {switching && (
+                <View style={styles.modalLoading}>
+                  <ActivityIndicator size="small" color="#6C5CE7" />
+                </View>
+              )}
+            </ScrollView>
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.createHouseholdButton}
+                onPress={() => {
+                  setShowHouseholdSwitch(false);
+                  setShowCreateModal(true);
+                }}
+                disabled={switching}
+              >
+                <Ionicons name="add-circle-outline" size={20} color="#6C5CE7" />
+                <Text style={styles.createHouseholdButtonText}>Create a New</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Create Household Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showCreateModal}
+        onRequestClose={() => setShowCreateModal(false)}
+      >
+        <View style={styles.pickerOverlay}>
+          <View style={styles.createModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Create New Household</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowCreateModal(false);
+                  setNewHouseholdName('');
+                  setNewHouseholdAddress('');
+                }}
+                style={styles.modalCloseButton}
+                disabled={creating}
+              >
+                <Ionicons name="close" size={24} color="#2D3436" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.createModalBody}>
+              <TextInput
+                style={styles.createModalInput}
+                placeholder="Household Name"
+                placeholderTextColor="#95A5A6"
+                value={newHouseholdName}
+                onChangeText={setNewHouseholdName}
+                autoCapitalize="words"
+                editable={!creating}
+              />
+              <TextInput
+                style={[styles.createModalInput, styles.createModalMultilineInput]}
+                placeholder="Address (Optional)"
+                placeholderTextColor="#95A5A6"
+                value={newHouseholdAddress}
+                onChangeText={setNewHouseholdAddress}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+                editable={!creating}
+              />
+              <View style={styles.createModalButtonRow}>
+                <TouchableOpacity
+                  style={[styles.createModalButton, styles.createModalCancelButton]}
+                  onPress={() => {
+                    setShowCreateModal(false);
+                    setNewHouseholdName('');
+                    setNewHouseholdAddress('');
+                  }}
+                  disabled={creating}
+                >
+                  <Text style={styles.createModalCancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.createModalButton, styles.createModalConfirmButton]}
+                  onPress={handleCreateHousehold}
+                  disabled={creating || !newHouseholdName.trim()}
+                >
+                  {creating ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.createModalButtonText}>Create</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -171,13 +532,17 @@ const styles = StyleSheet.create({
   topBarLeft: {
     width: 44,
   },
-  householdName: {
+  householdNameContainer: {
     flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  householdName: {
     fontSize: 18,
     fontWeight: '600',
     color: '#2D3436',
     textAlign: 'center',
-    paddingHorizontal: 16,
   },
   content: {
     flex: 1,
@@ -265,6 +630,168 @@ const styles = StyleSheet.create({
     height: 44,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#2D3436',
+  },
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  pickerBottomSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+    paddingBottom: 20,
+  },
+  pickerHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#D1D5DB',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E9ECEF',
+  },
+  pickerTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#2D3436',
+  },
+  pickerScrollView: {
+    maxHeight: 500,
+  },
+  pickerOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    gap: 12,
+  },
+  pickerOptionSelected: {
+    backgroundColor: '#E8F4FD',
+  },
+  pickerOptionText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#2D3436',
+    fontWeight: '500',
+  },
+  pickerOptionTextSelected: {
+    color: '#6C5CE7',
+    fontWeight: '600',
+  },
+  householdOptionContent: {
+    flex: 1,
+  },
+  householdOptionAddress: {
+    fontSize: 14,
+    color: '#636E72',
+  },
+  modalLoading: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  modalFooter: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#E9ECEF',
+  },
+  createHouseholdButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F0F4FF',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  createHouseholdButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6C5CE7',
+  },
+  createModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '60%',
+  },
+  createModalBody: {
+    padding: 20,
+  },
+  createModalInput: {
+    width: '100%',
+    backgroundColor: '#F8F9FA',
+    borderRadius: 10,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#2D3436',
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+    marginBottom: 15,
+  },
+  createModalMultilineInput: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  createModalButtonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 10,
+    gap: 12,
+  },
+  createModalButton: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createModalCancelButton: {
+    backgroundColor: '#E9ECEF',
+  },
+  createModalCancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#636E72',
+  },
+  createModalConfirmButton: {
+    backgroundColor: '#6C5CE7',
+  },
+  createModalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  modalCloseButton: {
+    padding: 4,
   },
 });
 

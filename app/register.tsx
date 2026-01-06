@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,22 +10,30 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Modal,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { signUp } from '@/lib/auth';
 
 export default function RegisterScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ inviteToken?: string; email?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [householdName, setHouseholdName] = useState('');
   const [userName, setUserName] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const router = useRouter();
+  const [showEmailConfirmationModal, setShowEmailConfirmationModal] = useState(false);
+
+  useEffect(() => {
+    if (params.email) {
+      setEmail(params.email);
+    }
+  }, [params]);
 
   const handleRegister = async () => {
     if (!email.trim()) {
@@ -45,10 +53,22 @@ export default function RegisterScreen() {
 
     setLoading(true);
     try {
-      const { user, error } = await signUp(email.trim(), password, householdName.trim() || undefined, userName.trim() || undefined);
-      setLoading(false);
-
+      // 两步注册：只创建用户，不创建家庭
+      const { user, error } = await signUp(email.trim(), password, undefined, userName.trim() || undefined);
+      
       if (error) {
+        setLoading(false);
+        
+        // 检查是否是邮箱确认错误（这是正常的，不是真正的错误）
+        const errorMessage = error.message || 'Unknown error';
+        
+        if (errorMessage === 'EMAIL_CONFIRMATION_REQUIRED') {
+          // 注册成功，但需要邮箱确认，不打印错误日志
+          setShowEmailConfirmationModal(true);
+          return;
+        }
+        
+        // 只有真正的错误才打印日志
         console.error('Registration error:', error);
         console.error('Error details:', {
           message: error.message,
@@ -57,8 +77,6 @@ export default function RegisterScreen() {
           details: (error as any).details,
         });
         
-        // 检查是否是邮件发送错误
-        const errorMessage = error.message || 'Unknown error';
         let userMessage = errorMessage;
         
         if (errorMessage.includes('confirmation email') || errorMessage.includes('sending email')) {
@@ -72,12 +90,22 @@ export default function RegisterScreen() {
           userMessage,
           [{ text: 'OK' }]
         );
-      } else if (user) {
-        // 注册成功，直接进入应用（新用户只有一个家庭，会自动设置）
-        router.replace('/');
-      } else {
-        Alert.alert('Registration Failed', 'Unknown error, please try again');
+        return;
       }
+
+      if (!user) {
+        setLoading(false);
+        Alert.alert('Registration Failed', 'Unknown error, please try again');
+        return;
+      }
+
+      setLoading(false);
+      // 注册成功，跳转到登录页面（用户需要登录后才能设置家庭）
+      Alert.alert(
+        'Registration Successful',
+        'Your account has been created. Please sign in to continue.',
+        [{ text: 'OK', onPress: () => router.replace('/login') }]
+      );
     } catch (err) {
       setLoading(false);
       console.error('Registration exception:', err);
@@ -118,6 +146,20 @@ export default function RegisterScreen() {
 
         <View style={styles.form}>
           <View style={styles.inputContainer}>
+            <Ionicons name="person-outline" size={20} color="#636E72" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Your name"
+              placeholderTextColor="#95A5A6"
+              value={userName}
+              onChangeText={setUserName}
+              autoCapitalize="words"
+              autoComplete="name"
+              textContentType="name"
+            />
+          </View>
+
+          <View style={styles.inputContainer}>
             <Ionicons name="mail-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
@@ -128,32 +170,10 @@ export default function RegisterScreen() {
               autoCapitalize="none"
               keyboardType="email-address"
               autoComplete="email"
+              textContentType="emailAddress"
             />
           </View>
 
-          <View style={styles.inputContainer}>
-            <Ionicons name="person-outline" size={20} color="#636E72" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Nick name"
-              placeholderTextColor="#95A5A6"
-              value={userName}
-              onChangeText={setUserName}
-              autoCapitalize="words"
-              autoComplete="name"
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Ionicons name="home-outline" size={20} color="#636E72" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Name your Household"
-              placeholderTextColor="#95A5A6"
-              value={householdName}
-              onChangeText={setHouseholdName}
-            />
-          </View>
 
           <View style={styles.inputContainer}>
             <Ionicons name="lock-closed-outline" size={20} color="#636E72" style={styles.inputIcon} />
@@ -166,6 +186,8 @@ export default function RegisterScreen() {
               secureTextEntry={!showPassword}
               autoCapitalize="none"
               autoComplete="password-new"
+              textContentType="newPassword"
+              passwordRules="minlength: 6;"
             />
             <TouchableOpacity
               onPress={() => setShowPassword(!showPassword)}
@@ -189,7 +211,8 @@ export default function RegisterScreen() {
               onChangeText={setConfirmPassword}
               secureTextEntry={!showConfirmPassword}
               autoCapitalize="none"
-              autoComplete="password-new"
+              autoComplete="password"
+              textContentType="newPassword"
             />
             <TouchableOpacity
               onPress={() => setShowConfirmPassword(!showConfirmPassword)}
@@ -225,6 +248,43 @@ export default function RegisterScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* 邮箱确认 Modal */}
+      <Modal
+        visible={showEmailConfirmationModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          setShowEmailConfirmationModal(false);
+          router.replace('/login');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIconContainer}>
+              <View style={styles.modalIconCircle}>
+                <Ionicons name="mail" size={48} color="#6C5CE7" />
+              </View>
+            </View>
+            <Text style={styles.modalTitle}>Check Your Email</Text>
+            <Text style={styles.modalMessage}>
+              You're just one step away from getting organized on Snap Receipt.
+            </Text>
+            <Text style={styles.modalSubMessage}>
+              Please check the email you received to verify your account.
+            </Text>
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => {
+                setShowEmailConfirmationModal(false);
+                router.replace('/login');
+              }}
+            >
+              <Text style={styles.modalButtonText}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -337,6 +397,77 @@ const styles = StyleSheet.create({
   },
   linkTextBold: {
     color: '#6C5CE7',
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 32,
+    width: '100%',
+    maxWidth: 400,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalIconContainer: {
+    marginBottom: 24,
+  },
+  modalIconCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#E8F4FD',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2D3436',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: 16,
+    color: '#2D3436',
+    textAlign: 'center',
+    marginBottom: 12,
+    lineHeight: 24,
+  },
+  modalSubMessage: {
+    fontSize: 15,
+    color: '#636E72',
+    textAlign: 'center',
+    marginBottom: 32,
+    lineHeight: 22,
+  },
+  modalButton: {
+    backgroundColor: '#6C5CE7',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 48,
+    minWidth: 200,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 16,
     fontWeight: '600',
   },
 });
