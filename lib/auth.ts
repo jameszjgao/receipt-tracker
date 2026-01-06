@@ -287,10 +287,27 @@ export async function createHousehold(name: string, address?: string): Promise<{
       };
     }
     
+    // 解析 JWT token 检查 role（用于调试）
+    let tokenRole = 'unknown';
+    try {
+      if (session.access_token) {
+        const tokenParts = session.access_token.split('.');
+        if (tokenParts.length === 3) {
+          const payload = JSON.parse(atob(tokenParts[1]));
+          tokenRole = payload.role || 'unknown';
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse JWT token:', e);
+    }
+    
     console.log('Session info:', {
       userId: session.user.id,
       userEmail: session.user.email,
       accessToken: session.access_token ? 'Present' : 'Missing',
+      tokenRole: tokenRole,
+      expiresAt: session.expires_at,
+      expiresIn: session.expires_at ? Math.floor((session.expires_at * 1000 - Date.now()) / 1000) : null,
     });
 
     // 创建家庭
@@ -308,11 +325,160 @@ export async function createHousehold(name: string, address?: string): Promise<{
       hasSession: !!session,
     });
     
-    const { data: householdData, error: householdError } = await supabase
-      .from('households')
-      .insert(insertData)
-      .select()
-      .single();
+    // 确保 Supabase 客户端使用当前的 session
+    // 如果 session 存在但客户端没有使用，尝试刷新
+    if (session) {
+      const { error: setSessionError } = await supabase.auth.setSession({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+      });
+      if (setSessionError) {
+        console.warn('Failed to set session:', setSessionError);
+      }
+    }
+    
+    // 再次验证 session（确保 token 有效）
+    const { data: { session: verifySession }, error: verifyError } = await supabase.auth.getSession();
+    if (!verifySession) {
+      console.error('Session verification failed:', verifyError);
+      return { 
+        household: null, 
+        error: new Error('Session expired or invalid. Please sign in again.') 
+      };
+    }
+    
+    console.log('Session verified, access token present:', !!verifySession.access_token);
+    
+    // 使用 getUser() 确保获取最新的用户信息和 token（这会自动刷新 token）
+    const { data: { user: currentUser }, error: getUserError } = await supabase.auth.getUser();
+    if (getUserError || !currentUser) {
+      console.error('Failed to get current user (token may be expired):', getUserError);
+      return { 
+        household: null, 
+        error: new Error('Authentication token expired. Please sign in again.') 
+      };
+    }
+    
+    console.log('Current user verified:', {
+      userId: currentUser.id,
+      email: currentUser.email,
+      matchesAuthUser: currentUser.id === authUser.id,
+    });
+    
+    // 在插入前再次确认 session 和 token
+    const { data: { session: finalSession } } = await supabase.auth.getSession();
+    if (!finalSession) {
+      console.error('Final session check failed - no session');
+      return { 
+        household: null, 
+        error: new Error('Session lost. Please sign in again.') 
+      };
+    }
+    
+    console.log('Final session check before insert:', {
+      hasAccessToken: !!finalSession.access_token,
+      tokenLength: finalSession.access_token?.length || 0,
+      expiresAt: finalSession.expires_at,
+      expiresIn: finalSession.expires_at ? Math.floor((finalSession.expires_at * 1000 - Date.now()) / 1000) : null,
+    });
+    
+    // 尝试使用 RPC 函数插入（如果存在，可以绕过 RLS）
+    // 如果 RPC 函数不存在，会回退到直接插入
+    let householdData = null;
+    let householdError = null;
+    
+    // 先尝试使用 RPC 函数（如果存在）
+    const { data: rpcHouseholdId, error: rpcError } = await supabase.rpc('create_household_with_user', {
+      p_household_name: insertData.name,
+      p_household_address: insertData.address || null,
+      p_user_id: currentUser.id,
+    });
+    
+    if (!rpcError && rpcHouseholdId) {
+      // RPC 成功，查询创建的 household
+      const { data: fetchedHousehold, error: fetchError } = await supabase
+        .from('households')
+        .select('*')
+        .eq('id', rpcHouseholdId)
+        .single();
+      
+      if (!fetchError && fetchedHousehold) {
+        householdData = fetchedHousehold;
+        console.log('✓ Household created via RPC function:', householdData.id);
+      } else {
+        householdError = fetchError;
+        console.warn('RPC created household but failed to fetch:', fetchError);
+      }
+    } else {
+      // RPC 失败或不存在，尝试直接插入
+      // 检查是否是函数不存在的错误（42883）还是其他错误
+      const isFunctionNotFound = rpcError?.code === '42883' || rpcError?.message?.includes('function') || rpcError?.message?.includes('does not exist');
+      
+      if (rpcError && !isFunctionNotFound) {
+        // RPC 函数存在但执行失败，记录错误但继续尝试直接插入
+        console.warn('RPC function error (will try direct insert):', rpcError.message, rpcError.code);
+      } else if (isFunctionNotFound) {
+        console.log('RPC function not available, trying direct insert...');
+      } else {
+        console.log('RPC returned no data, trying direct insert...');
+      }
+      
+      // 直接插入 households 表
+      const insertResult = await supabase
+        .from('households')
+        .insert(insertData)
+        .select()
+        .single();
+      
+      householdData = insertResult.data;
+      householdError = insertResult.error;
+      
+      // 如果直接插入成功，需要手动创建 user_households 关联和更新 current_household_id
+      if (!householdError && householdData) {
+        console.log('✓ Household created via direct insert:', householdData.id);
+        
+        // 创建 user_households 关联
+        const { error: associationError } = await supabase
+          .from('user_households')
+          .insert({
+            user_id: currentUser.id,
+            household_id: householdData.id,
+            is_admin: true,
+          });
+        
+        if (associationError) {
+          console.error('Failed to create user_households association:', associationError);
+          // 如果关联失败，尝试删除刚创建的家庭
+          try {
+            await supabase.from('households').delete().eq('id', householdData.id);
+            console.warn('Cleaned up household after association error');
+          } catch (deleteError) {
+            console.warn('Failed to cleanup household after association error:', deleteError);
+          }
+          householdError = associationError;
+          householdData = null;
+        } else {
+          // 更新用户的 current_household_id
+          const { error: updateError } = await supabase
+            .from('users')
+            .update({ current_household_id: householdData.id })
+            .eq('id', currentUser.id);
+          
+          if (updateError) {
+            console.warn('Failed to update current_household_id:', updateError);
+            // 不阻止流程，用户可以稍后手动选择
+          }
+        }
+      }
+    }
+    
+    // 如果直接插入失败，记录详细的请求信息
+    if (householdError) {
+      console.error('Direct insert failed, checking request details...');
+      console.error('Insert data:', JSON.stringify(insertData, null, 2));
+      console.error('Has session:', !!finalSession);
+      console.error('Session user ID:', finalSession.user.id);
+    }
 
     if (householdError) {
       // 详细记录错误信息
@@ -336,6 +502,23 @@ export async function createHousehold(name: string, address?: string): Promise<{
         console.error('Current User Email:', authUser.email);
         console.error('Has Active Session:', !!session);
         console.error('Session User ID:', session?.user?.id);
+        
+        // 解析 JWT token 检查 role
+        let tokenRole = 'unknown';
+        try {
+          if (session?.access_token) {
+            const tokenParts = session.access_token.split('.');
+            if (tokenParts.length === 3) {
+              const payload = JSON.parse(atob(tokenParts[1]));
+              tokenRole = payload.role || 'unknown';
+              console.error('JWT Token Role:', tokenRole);
+              console.error('JWT Token Claims:', JSON.stringify(payload, null, 2));
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse JWT token:', e);
+        }
+        
         console.error('================================');
         console.error('Troubleshooting steps:');
         console.error('1. Check if RLS is enabled: SELECT tablename, rowsecurity FROM pg_tables WHERE tablename = \'households\';');
@@ -368,6 +551,7 @@ export async function createHousehold(name: string, address?: string): Promise<{
     }
 
     // 检查 user_households 关联是否已存在（RPC 函数可能已创建）
+    // 注意：如果使用直接插入，关联已经在上面创建了
     const { data: existingAssociation } = await supabase
       .from('user_households')
       .select('id')
@@ -375,7 +559,7 @@ export async function createHousehold(name: string, address?: string): Promise<{
       .eq('household_id', householdData.id)
       .maybeSingle();
 
-    // 如果关联不存在，创建关联
+    // 如果关联不存在（RPC 函数可能没有创建），创建关联
     if (!existingAssociation) {
       const { error: associationError } = await supabase
         .from('user_households')
@@ -390,14 +574,25 @@ export async function createHousehold(name: string, address?: string): Promise<{
         // 注意：删除可能也会失败（RLS 错误），但不影响主要错误信息
         try {
           await supabase.from('households').delete().eq('id', householdData.id);
+          console.warn('Cleaned up household after association error');
         } catch (deleteError) {
           console.warn('Failed to cleanup household after association error:', deleteError);
         }
-        throw associationError;
+        
+        // 返回更友好的错误信息
+        return {
+          household: null,
+          error: new Error(
+            `创建家庭成功，但关联用户失败。错误代码: ${associationError.code || 'unknown'}\n` +
+            `错误信息: ${associationError.message}\n\n` +
+            `请检查 user_households 表的 INSERT RLS 策略是否正确。`
+          ),
+        };
       }
     }
 
     // 设置为当前家庭（RPC 函数可能已设置，但确保设置正确）
+    // 如果直接插入时已经更新了，这里会再次更新（不会出错）
     const { error: setCurrentError } = await setCurrentHousehold(householdData.id);
     if (setCurrentError) {
       console.warn('Failed to set as current household:', setCurrentError);

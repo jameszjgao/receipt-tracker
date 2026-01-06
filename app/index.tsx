@@ -114,7 +114,14 @@ export default function HomeScreen() {
       return;
     }
 
-    // 检查用户是否有家庭（区分新用户和老用户）
+    // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用
+    // 这样可以快速登录，使用上次登录的家庭，避免不必要的查询
+    if (user.currentHouseholdId || user.householdId) {
+      setIsLoggedIn(true);
+      return;
+    }
+
+    // 用户没有当前家庭，检查用户是否有家庭（区分新用户和老用户）
     const { getUserHouseholds } = await import('@/lib/auth');
     const households = await getUserHouseholds();
     
@@ -124,22 +131,14 @@ export default function HomeScreen() {
       return;
     }
 
-    // 老用户：有家庭
-    // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用
-    // 这样可以快速登录，使用上次登录的家庭
-    if (user.currentHouseholdId || user.householdId) {
-      setIsLoggedIn(true);
-      return;
-    }
-
     // 老用户：有家庭但没有当前家庭
     if (households.length === 1) {
       // 只有一个家庭，自动设置并进入
       const { setCurrentHousehold } = await import('@/lib/auth');
       await setCurrentHousehold(households[0].householdId);
-      // 更新缓存
-      const updatedUser = await getCurrentUser(true);
-      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
+      // 更新缓存（使用已设置的家庭ID，避免再次查询）
+      const updatedUser = await getCurrentUser(); // 不强制刷新，使用缓存
+      const updatedHousehold = updatedUser ? await getCurrentHousehold() : null; // 不强制刷新，使用缓存
       await initializeAuthCache(updatedUser, updatedHousehold);
       setIsLoggedIn(true);
       return;

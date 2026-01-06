@@ -52,16 +52,19 @@ export default function SetupHouseholdScreen() {
       const invitations = await getPendingInvitationsForUser();
       setPendingInvitations(invitations);
 
-      // 加载家庭名称
+      // 批量加载家庭名称（优化：一次性查询所有household，避免N+1查询）
       const names: Record<string, string> = {};
-      for (const inv of invitations) {
-        const { data: household } = await supabase
+      if (invitations.length > 0) {
+        const householdIds = invitations.map(inv => inv.householdId);
+        const { data: households } = await supabase
           .from('households')
-          .select('name')
-          .eq('id', inv.householdId)
-          .single();
-        if (household) {
-          names[inv.householdId] = household.name;
+          .select('id, name')
+          .in('id', householdIds);
+        
+        if (households) {
+          households.forEach(household => {
+            names[household.id] = household.name;
+          });
         }
       }
       setHouseholdNames(names);
@@ -208,9 +211,9 @@ export default function SetupHouseholdScreen() {
       }
 
       if (household) {
-        // 更新缓存
+        // 更新缓存（使用已创建的household，避免再次查询）
         const { getCurrentUser } = await import('@/lib/auth');
-        const updatedUser = await getCurrentUser(true);
+        const updatedUser = await getCurrentUser(); // 不强制刷新，使用缓存或快速查询
         await initializeAuthCache(updatedUser, household);
         
         // 创建家庭后直接跳转，不显示 Alert（更流畅的体验）
