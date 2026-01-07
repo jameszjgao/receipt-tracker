@@ -116,6 +116,18 @@ export default function RootLayout() {
             headerShown: false
           }} 
         />
+        <Stack.Screen 
+          name="handle-invitations" 
+          options={{ 
+            headerShown: false
+          }} 
+        />
+        <Stack.Screen 
+          name="setup-household" 
+          options={{ 
+            headerShown: false
+          }} 
+        />
       </Stack>
   );
 }

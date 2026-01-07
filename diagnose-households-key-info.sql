@@ -110,3 +110,5 @@ WHERE table_schema = 'public'
   AND table_name = 'households'
 ORDER BY ordinal_position;
 
+
+

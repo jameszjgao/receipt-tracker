@@ -52,10 +52,18 @@ export default function SetupHouseholdScreen() {
       const invitations = await getPendingInvitationsForUser();
       setPendingInvitations(invitations);
 
-      // 批量加载家庭名称（优化：一次性查询所有household，避免N+1查询）
+      // 使用邀请数据中的家庭名称（已经在 getPendingInvitationsForUser 中通过 join 获取）
       const names: Record<string, string> = {};
-      if (invitations.length > 0) {
-        const householdIds = invitations.map(inv => inv.householdId);
+      invitations.forEach(invitation => {
+        if (invitation.householdName) {
+          names[invitation.householdId] = invitation.householdName;
+        }
+      });
+      
+      // 如果某些邀请没有家庭名称，尝试批量查询补充
+      const invitationsWithoutName = invitations.filter(inv => !inv.householdName);
+      if (invitationsWithoutName.length > 0) {
+        const householdIds = invitationsWithoutName.map(inv => inv.householdId);
         const { data: households } = await supabase
           .from('households')
           .select('id, name')
@@ -67,6 +75,7 @@ export default function SetupHouseholdScreen() {
           });
         }
       }
+      
       setHouseholdNames(names);
 
       // 如果有邀请，默认显示邀请模式；否则显示创建模式
@@ -282,13 +291,7 @@ export default function SetupHouseholdScreen() {
                   </View>
                 </View>
                 <View style={styles.invitationButtons}>
-                  <TouchableOpacity
-                    style={[styles.invitationButton, styles.declineButton]}
-                    onPress={() => handleDeclineInvitation(invitation)}
-                    disabled={accepting}
-                  >
-                    <Text style={styles.declineButtonText}>Decline</Text>
-                  </TouchableOpacity>
+                  {/* 第一个按钮：接受 */}
                   <TouchableOpacity
                     style={[styles.invitationButton, styles.acceptButton, accepting && styles.buttonDisabled]}
                     onPress={() => handleAcceptInvitation(invitation)}
@@ -299,6 +302,27 @@ export default function SetupHouseholdScreen() {
                     ) : (
                       <Text style={styles.acceptButtonText}>Accept</Text>
                     )}
+                  </TouchableOpacity>
+                  
+                  {/* 第二个按钮：拒绝 */}
+                  <TouchableOpacity
+                    style={[styles.invitationButton, styles.declineButton]}
+                    onPress={() => handleDeclineInvitation(invitation)}
+                    disabled={accepting}
+                  >
+                    <Text style={styles.declineButtonText}>Decline</Text>
+                  </TouchableOpacity>
+                  
+                  {/* 第三个按钮：后续处理 */}
+                  <TouchableOpacity
+                    style={[styles.invitationButton, styles.laterButton]}
+                    onPress={() => {
+                      // 后续处理：关闭邀请模式，切换到创建模式
+                      setMode('create');
+                    }}
+                    disabled={accepting}
+                  >
+                    <Text style={styles.laterButtonText}>Deal with Later</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -460,16 +484,17 @@ const styles = StyleSheet.create({
     color: '#636E72',
   },
   invitationButtons: {
-    flexDirection: 'row',
-    gap: 12,
+    flexDirection: 'column',
+    width: '100%',
   },
   invitationButton: {
-    flex: 1,
-    paddingVertical: 12,
+    width: '100%',
+    paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 48,
+    minHeight: 52,
+    marginBottom: 12,
   },
   declineButton: {
     backgroundColor: '#F8F9FA',
@@ -483,11 +508,27 @@ const styles = StyleSheet.create({
   },
   acceptButton: {
     backgroundColor: '#6C5CE7',
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   acceptButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  laterButton: {
+    backgroundColor: '#F8F9FA',
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+    marginBottom: 0, // 最后一个按钮不需要底部间距
+  },
+  laterButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#636E72',
   },
   createSection: {
     marginBottom: 24,

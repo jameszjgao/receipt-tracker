@@ -34,7 +34,14 @@ export default function HandleInvitationsScreen() {
   const checkInvitations = async () => {
     try {
       setLoading(true);
-      const invitations = await getPendingInvitationsForUser();
+      
+      // 尝试获取邀请，如果失败则记录错误但继续流程
+      let invitations: any[] = [];
+      try {
+        invitations = await getPendingInvitationsForUser();
+      } catch (invError) {
+        // 即使加载邀请失败，也继续流程
+      }
       
       if (invitations.length === 0) {
         // 没有邀请，继续正常流程
@@ -42,23 +49,16 @@ export default function HandleInvitationsScreen() {
         return;
       }
 
-      // 有邀请，加载所有邀请的家庭名称
-      const invitationsWithNames: Array<{ id: string; householdId: string; token: string; name: string }> = [];
+      // 直接使用邀请数据中的家庭名称（已经在 getPendingInvitationsForUser 中通过 join 获取）
+      const invitationsWithNames: Array<{ id: string; householdId: string; token: string; name: string }> = invitations.map(invitation => ({
+        id: invitation.id,
+        householdId: invitation.householdId,
+        token: invitation.token,
+        name: invitation.householdName || 'Unknown Household',
+      }));
       
-      for (const invitation of invitations) {
-        const { data: householdData } = await supabase
-          .from('households')
-          .select('name')
-          .eq('id', invitation.householdId)
-          .maybeSingle();
-        
-        invitationsWithNames.push({
-          id: invitation.id,
-          householdId: invitation.householdId,
-          token: invitation.token,
-          name: householdData?.name || 'Unknown Household',
-        });
-      }
+      // 如果没有获取到家庭名称，记录警告
+      const invitationsWithoutName = invitationsWithNames.filter(inv => inv.name === 'Unknown Household');
       
       // 保存所有邀请并显示第一个
       setPendingInvitations(invitationsWithNames);
@@ -90,43 +90,53 @@ export default function HandleInvitationsScreen() {
   };
 
   const continueAfterInvitations = async () => {
-    // 检查用户是否有当前家庭（使用缓存，如果缓存未初始化则从数据库读取）
-    const user = await getCurrentUser();
-    if (!user) {
+    try {
+      // 检查用户是否有当前家庭（使用缓存，如果缓存未初始化则从数据库读取）
+      const user = await getCurrentUser();
+      if (!user) {
+        router.replace('/setup-household');
+        return;
+      }
+
+      // 检查用户是否有家庭（区分新用户和老用户）
+      const households = await getUserHouseholds();
+      
+      // 新用户：没有家庭，跳转到设置家庭页面（创建家庭）
+      if (households.length === 0) {
+        router.replace('/setup-household');
+        return;
+      }
+
+      // 老用户：有家庭
+      // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用
+      if (user.currentHouseholdId || user.householdId) {
+        router.replace('/');
+        return;
+      }
+
+      // 老用户：有家庭但没有当前家庭
+      if (households.length === 1) {
+        // 只有一个家庭，自动设置并进入
+        await setCurrentHousehold(households[0].householdId);
+        // 更新缓存（不强制刷新，避免权限错误）
+        try {
+          const updatedUser = await getCurrentUser();
+          const updatedHousehold = updatedUser ? await getCurrentHousehold() : null;
+          await initializeAuthCache(updatedUser, updatedHousehold);
+        } catch (cacheError) {
+          // 继续流程，缓存错误不影响主流程
+        }
+        router.replace('/');
+        return;
+      } else {
+        // 多个家庭但没有当前家庭，跳转到家庭选择页面
+        router.replace('/household-select');
+        return;
+      }
+    } catch (error) {
+      console.error('Error in continueAfterInvitations:', error);
+      // 如果出错，默认跳转到设置家庭页面
       router.replace('/setup-household');
-      return;
-    }
-
-    // 检查用户是否有家庭（区分新用户和老用户）
-    const households = await getUserHouseholds();
-    
-    // 新用户：没有家庭，跳转到设置家庭页面（创建家庭）
-    if (households.length === 0) {
-      router.replace('/setup-household');
-      return;
-    }
-
-    // 老用户：有家庭
-    // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用
-    if (user.currentHouseholdId || user.householdId) {
-      router.replace('/');
-      return;
-    }
-
-    // 老用户：有家庭但没有当前家庭
-    if (households.length === 1) {
-      // 只有一个家庭，自动设置并进入
-      await setCurrentHousehold(households[0].householdId);
-      // 更新缓存
-      const updatedUser = await getCurrentUser(true);
-      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
-      await initializeAuthCache(updatedUser, updatedHousehold);
-      router.replace('/');
-      return;
-    } else {
-      // 多个家庭但没有当前家庭，跳转到家庭选择页面
-      router.replace('/household-select');
-      return;
     }
   };
 
@@ -146,14 +156,17 @@ export default function HandleInvitationsScreen() {
       // 接受邀请后，自动切换到新加入的家庭
       const { error: switchError } = await setCurrentHousehold(inviteHouseholdId);
       if (switchError) {
-        console.error('Error switching household:', switchError);
         // 即使切换失败，也继续，因为用户已经加入了家庭
       }
 
-      // 更新缓存
-      const updatedUser = await getCurrentUser(true);
-      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
-      await initializeAuthCache(updatedUser, updatedHousehold);
+      // 更新缓存（不强制刷新，避免权限错误）
+      try {
+        const updatedUser = await getCurrentUser();
+        const updatedHousehold = updatedUser ? await getCurrentHousehold() : null;
+        await initializeAuthCache(updatedUser, updatedHousehold);
+      } catch (cacheError) {
+        // 继续流程，缓存错误不影响主流程
+      }
 
       // 关闭当前邀请对话框
       setShowInviteModal(false);
@@ -257,7 +270,40 @@ export default function HandleInvitationsScreen() {
         <StatusBar style="dark" />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#6C5CE7" />
-          <Text style={styles.loadingText}>Loading...</Text>
+          <Text style={styles.loadingText}>Loading invitations...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // 如果加载完成但没有显示邀请对话框，说明可能出现了错误
+  // 在这种情况下，显示错误信息并允许用户继续
+  if (!loading && !showInviteModal && pendingInvitations.length === 0) {
+    return (
+      <View style={styles.container}>
+        <StatusBar style="dark" />
+        <View style={styles.loadingContainer}>
+          <Ionicons name="alert-circle-outline" size={48} color="#E74C3C" />
+          <Text style={styles.errorTitle}>Unable to Load Invitations</Text>
+          <Text style={styles.errorText}>
+            There may be a database permission issue. Please check if RLS policies are correctly configured.
+          </Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              checkInvitations();
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.skipButton}
+            onPress={() => {
+              continueAfterInvitations();
+            }}
+          >
+            <Text style={styles.skipButtonText}>Skip and Continue</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -287,8 +333,9 @@ export default function HandleInvitationsScreen() {
               Do you want to join this household?
             </Text>
             <View style={styles.modalButtons}>
+              {/* 第一个按钮：接受 */}
               <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonAccept]}
+                style={[styles.modalButton, styles.modalButtonAccept, acceptingInvite && styles.buttonDisabled]}
                 onPress={handleAcceptInvitation}
                 disabled={acceptingInvite}
               >
@@ -298,13 +345,17 @@ export default function HandleInvitationsScreen() {
                   <Text style={styles.modalButtonAcceptText}>Accept</Text>
                 )}
               </TouchableOpacity>
+              
+              {/* 第二个按钮：拒绝 */}
               <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonCancel]}
+                style={[styles.modalButton, styles.modalButtonDecline]}
                 onPress={handleDeclineInvitation}
                 disabled={acceptingInvite}
               >
-                <Text style={styles.modalButtonCancelText}>Decline</Text>
+                <Text style={styles.modalButtonDeclineText}>Decline</Text>
               </TouchableOpacity>
+              
+              {/* 第三个按钮：后续处理 */}
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonLater]}
                 onPress={handleLaterInvitation}
@@ -334,6 +385,49 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     color: '#636E72',
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2D3436',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#636E72',
+    textAlign: 'center',
+    paddingHorizontal: 32,
+    marginBottom: 24,
+  },
+  retryButton: {
+    backgroundColor: '#6C5CE7',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    marginBottom: 12,
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  skipButton: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  skipButtonText: {
+    color: '#636E72',
+    fontSize: 16,
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
@@ -379,42 +473,52 @@ const styles = StyleSheet.create({
   },
   modalButtons: {
     flexDirection: 'column',
-    gap: 12,
     width: '100%',
+    marginTop: 8,
   },
   modalButton: {
     width: '100%',
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 44,
+    minHeight: 52,
+    marginBottom: 12,
   },
-  modalButtonCancel: {
+  modalButtonDecline: {
     backgroundColor: '#F8F9FA',
     borderWidth: 1,
     borderColor: '#E9ECEF',
   },
-  modalButtonCancelText: {
-    fontSize: 14,
+  modalButtonDeclineText: {
+    fontSize: 16,
     fontWeight: '600',
     color: '#636E72',
   },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
   modalButtonLater: {
-    backgroundColor: '#FFF3E0',
+    backgroundColor: '#F8F9FA',
     borderWidth: 1,
-    borderColor: '#FFB74D',
+    borderColor: '#E9ECEF',
+    marginBottom: 0, // 最后一个按钮不需要底部间距
   },
   modalButtonLaterText: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#E65100',
+    color: '#636E72',
   },
   modalButtonAccept: {
     backgroundColor: '#6C5CE7',
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   modalButtonAcceptText: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
     color: '#fff',
   },

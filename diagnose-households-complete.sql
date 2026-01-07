@@ -124,3 +124,5 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
   AND ccu.table_name = 'households'
   AND ccu.table_schema = 'public';
 
+
+

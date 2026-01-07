@@ -100,3 +100,5 @@ EXCEPTION
         RAISE EXCEPTION '✗ Test insert failed! Error: %, Code: %', SQLERRM, SQLSTATE;
 END $$;
 
+
+

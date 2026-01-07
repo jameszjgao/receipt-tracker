@@ -27,6 +27,15 @@ export async function getCurrentUser(forceRefresh: boolean = false): Promise<Use
       .eq('id', authUser.id)
       .maybeSingle();
 
+    // 如果是权限错误，记录错误信息
+    if (error) {
+      if (error.code === '42501' || error.message?.includes('permission denied')) {
+        console.error('Permission error accessing users table');
+        updateCachedUser(null);
+        return null;
+      }
+    }
+
     // 如果用户记录不存在，尝试创建（可能是新注册的用户，users 表记录还未创建）
     if (error || !data) {
       // 尝试创建用户记录
@@ -126,7 +135,21 @@ export async function getCurrentHousehold(forceRefresh: boolean = false): Promis
   }
 
   try {
-    const user = await getCurrentUser();
+    // 尝试获取用户信息，如果失败（权限错误）则返回 null
+    let user: User | null = null;
+    try {
+      user = await getCurrentUser();
+    } catch (userError: any) {
+      // 如果是权限错误，记录警告但继续
+      if (userError?.code === '42501' || userError?.message?.includes('permission denied')) {
+        console.warn('Permission error getting user, RLS policy may need to be fixed:', userError.message);
+        updateCachedHousehold(null);
+        return null;
+      }
+      // 其他错误继续抛出
+      throw userError;
+    }
+    
     if (!user) {
       updateCachedHousehold(null);
       return null;
@@ -145,7 +168,15 @@ export async function getCurrentHousehold(forceRefresh: boolean = false): Promis
       .eq('id', householdId)
       .single();
 
-    if (error) throw error;
+    if (error) {
+      // 如果是权限错误，记录但不抛出
+      if (error.code === '42501' || error.message?.includes('permission denied')) {
+        updateCachedHousehold(null);
+        return null;
+      }
+      throw error;
+    }
+    
     if (!data) {
       updateCachedHousehold(null);
       return null;
@@ -269,7 +300,6 @@ export async function createHousehold(name: string, address?: string): Promise<{
       
       if (userInsertError) {
         // 如果创建用户记录失败（可能是 RLS 错误），返回友好错误
-        console.log('User record creation failed, this may require email confirmation:', userInsertError.code);
         return { 
           household: null, 
           error: new Error('Please confirm your email first, then try creating a household again.') 
@@ -347,7 +377,6 @@ export async function createHousehold(name: string, address?: string): Promise<{
       };
     }
     
-    console.log('Session verified, access token present:', !!verifySession.access_token);
     
     // 使用 getUser() 确保获取最新的用户信息和 token（这会自动刷新 token）
     const { data: { user: currentUser }, error: getUserError } = await supabase.auth.getUser();
@@ -404,10 +433,8 @@ export async function createHousehold(name: string, address?: string): Promise<{
       
       if (!fetchError && fetchedHousehold) {
         householdData = fetchedHousehold;
-        console.log('✓ Household created via RPC function:', householdData.id);
       } else {
         householdError = fetchError;
-        console.warn('RPC created household but failed to fetch:', fetchError);
       }
     } else {
       // RPC 失败或不存在，尝试直接插入
@@ -435,7 +462,6 @@ export async function createHousehold(name: string, address?: string): Promise<{
       
       // 如果直接插入成功，需要手动创建 user_households 关联和更新 current_household_id
       if (!householdError && householdData) {
-        console.log('✓ Household created via direct insert:', householdData.id);
         
         // 创建 user_households 关联
         const { error: associationError } = await supabase
@@ -474,10 +500,6 @@ export async function createHousehold(name: string, address?: string): Promise<{
     
     // 如果直接插入失败，记录详细的请求信息
     if (householdError) {
-      console.error('Direct insert failed, checking request details...');
-      console.error('Insert data:', JSON.stringify(insertData, null, 2));
-      console.error('Has session:', !!finalSession);
-      console.error('Session user ID:', finalSession.user.id);
     }
 
     if (householdError) {
@@ -493,15 +515,6 @@ export async function createHousehold(name: string, address?: string): Promise<{
       
       // 如果是 RLS 错误，提供详细的错误信息和修复建议
       if (householdError.code === '42501' || householdError.message?.includes('row-level security') || householdError.message?.includes('permission denied')) {
-        console.error('=== RLS POLICY ERROR DETAILS ===');
-        console.error('Error Code:', householdError.code);
-        console.error('Error Message:', householdError.message);
-        console.error('Error Details:', householdError.details);
-        console.error('Error Hint:', householdError.hint);
-        console.error('Current User ID:', authUser.id);
-        console.error('Current User Email:', authUser.email);
-        console.error('Has Active Session:', !!session);
-        console.error('Session User ID:', session?.user?.id);
         
         // 解析 JWT token 检查 role
         let tokenRole = 'unknown';
@@ -511,22 +524,12 @@ export async function createHousehold(name: string, address?: string): Promise<{
             if (tokenParts.length === 3) {
               const payload = JSON.parse(atob(tokenParts[1]));
               tokenRole = payload.role || 'unknown';
-              console.error('JWT Token Role:', tokenRole);
-              console.error('JWT Token Claims:', JSON.stringify(payload, null, 2));
             }
           }
         } catch (e) {
           console.error('Failed to parse JWT token:', e);
         }
         
-        console.error('================================');
-        console.error('Troubleshooting steps:');
-        console.error('1. Check if RLS is enabled: SELECT tablename, rowsecurity FROM pg_tables WHERE tablename = \'households\';');
-        console.error('2. Check if policy exists: SELECT * FROM pg_policies WHERE tablename = \'households\' AND cmd = \'INSERT\';');
-        console.error('3. Verify policy roles: Should include \'authenticated\' or \'public\'');
-        console.error('4. Verify WITH CHECK clause: Should be \'true\'');
-        console.error('5. Execute fix-households-insert-direct.sql (for authenticated) or fix-households-insert-public.sql (for public) in Supabase SQL Editor');
-        console.error('================================');
         
         return { 
           household: null, 
@@ -674,7 +677,6 @@ export async function signUp(email: string, password: string, householdName?: st
     // 两步注册：只创建用户，不创建家庭
     // 用户将在首次登录时设置家庭或接受邀请
     if (householdName === undefined) {
-      console.log('Two-step registration: Creating user without household');
       
       // 如果启用了邮箱确认，authData.user 可能为 null，但 auth.users 记录已经创建
       // 我们需要尝试创建 users 表记录
@@ -682,14 +684,12 @@ export async function signUp(email: string, password: string, householdName?: st
         // 注册成功，但需要邮箱确认，auth.users 记录已创建但无法获取 user.id
         // 在这种情况下，用户记录将在邮箱确认时或首次登录时创建
         // 返回需要邮箱确认的标记
-        console.log('Email confirmation required: auth.users record created but user.id not available yet');
         return { 
           user: null, 
           error: new Error('EMAIL_CONFIRMATION_REQUIRED') 
         };
       }
       
-      console.log('Auth user created:', authData.user.id, authData.user.email);
       
       // 检查 users 表中是否已存在该用户（以防万一）
       const { data: existingUser } = await supabase
@@ -756,7 +756,6 @@ export async function signUp(email: string, password: string, householdName?: st
         };
       }
 
-      console.log('User record created successfully in users table');
       const user: User = {
         id: authData.user.id,
         email: email,
@@ -770,7 +769,6 @@ export async function signUp(email: string, password: string, householdName?: st
     // 创建家庭和用户记录
     const householdNameFinal = householdName || `${email.split('@')[0]}'s Household`;
     // userNameFinal 已在函数开始处声明（第 338 行），直接使用
-    console.log('Creating household and user via RPC:', householdNameFinal, 'User Name:', userNameFinal);
     
     const { data: householdId, error: rpcError } = await supabase.rpc('create_user_with_household', {
       p_user_id: authData.user.id,
@@ -784,7 +782,6 @@ export async function signUp(email: string, password: string, householdName?: st
       
       // 如果 RPC 函数不存在，回退到直接插入（尝试）
       if (rpcError.message?.includes('function') || rpcError.code === '42883') {
-        console.log('RPC function not found, trying direct insert...');
         
         // 尝试直接插入（如果 RLS 策略允许）
         const { data: householdData, error: householdError } = await supabase
@@ -821,7 +818,6 @@ export async function signUp(email: string, password: string, householdName?: st
           throw new Error(`Failed to create user record: ${userError.message}`);
         }
         
-        console.log('User and household created via direct insert');
         
         // 创建 user_households 关联记录
         const { error: associationError } = await supabase
@@ -856,7 +852,6 @@ export async function signUp(email: string, password: string, householdName?: st
       throw new Error('Registration failed: Household account not created');
     }
 
-    console.log('User and household created via RPC, household ID:', householdId);
 
     // 创建默认分类和支付账户
     await createDefaultCategoriesAndAccounts(householdId);
@@ -965,7 +960,6 @@ export async function signIn(email: string, password: string): Promise<{ error: 
             });
             // 即使创建失败，也继续登录流程（getCurrentUser 会再次尝试创建）
           } else {
-            console.log('User record created successfully after login');
           }
         }
       }

@@ -278,20 +278,37 @@ export default function HouseholdMembersScreen() {
       return;
     }
 
+    const emailToInvite = inviteEmail.trim();
+    
+    // 立即添加到pending列表，显示loading状态
+    const tempInvitation: HouseholdInvitation = {
+      id: `temp-${Date.now()}`,
+      householdId: '', // 将在加载时填充
+      inviterId: '',
+      inviteeEmail: emailToInvite,
+      token: '',
+      status: 'pending',
+      expiresAt: '',
+      createdAt: new Date().toISOString(),
+    };
+    
+    setPendingInvitations(prev => [...prev, tempInvitation]);
+    setShowInviteModal(false);
+    setInviteEmail('');
     setInviting(true);
-    const { invitation, error } = await createInvitation(inviteEmail.trim());
+
+    // 创建邀请
+    const { invitation, error } = await createInvitation(emailToInvite);
     setInviting(false);
 
     if (error) {
+      // 如果失败，从列表中移除临时项
+      setPendingInvitations(prev => prev.filter(inv => inv.id !== tempInvitation.id));
       Alert.alert('Error', error.message || 'Failed to send invitation');
     } else {
-      Alert.alert('Success', 'Invitation sent successfully!', [
-        { text: 'OK', onPress: () => {
-          setShowInviteModal(false);
-          setInviteEmail('');
-          loadInvitationsOnly(); // 只更新邀请列表
-        }},
-      ]);
+      // 成功：移除临时项，然后加载最新邀请列表（这会用真实的邀请数据替换）
+      setPendingInvitations(prev => prev.filter(inv => inv.id !== tempInvitation.id));
+      loadInvitationsOnly(); // 加载真实的邀请数据
     }
   };
 
@@ -433,22 +450,32 @@ export default function HouseholdMembersScreen() {
                 const totalCancelled = cancelledInvitations.length;
                 const totalRemoved = removedInvitations.length;
                 const isLast = index === totalPending - 1 && totalDeclined === 0 && totalCancelled === 0 && totalRemoved === 0;
+                const isTemp = invitation.id.startsWith('temp-');
                 return (
                 <View key={invitation.id} style={[styles.compactItem, isLast && styles.compactItemLast]}>
                   <View style={styles.compactItemContent}>
                     <Text style={styles.compactEmail}>{invitation.inviteeEmail}</Text>
                     <View style={styles.compactBadges}>
-                      <View style={[styles.compactBadge, styles.pendingBadge]}>
-                        <Text style={[styles.compactBadgeText, styles.pendingBadgeText]}>Pending</Text>
-                      </View>
+                      {isTemp && inviting ? (
+                        <View style={[styles.compactBadge, styles.pendingBadge, { flexDirection: 'row', alignItems: 'center' }]}>
+                          <ActivityIndicator size="small" color="#4CAF50" style={{ marginRight: 4 }} />
+                          <Text style={[styles.compactBadgeText, styles.pendingBadgeText]}>Sending...</Text>
+                        </View>
+                      ) : (
+                        <View style={[styles.compactBadge, styles.pendingBadge]}>
+                          <Text style={[styles.compactBadgeText, styles.pendingBadgeText]}>Pending</Text>
+                        </View>
+                      )}
                     </View>
                   </View>
-                  <TouchableOpacity
-                    style={styles.compactActionButton}
-                    onPress={() => handleCancelInvitation(invitation.id)}
-                  >
-                    <Ionicons name="close-circle-outline" size={20} color="#636E72" />
-                  </TouchableOpacity>
+                  {!isTemp && (
+                    <TouchableOpacity
+                      style={styles.compactActionButton}
+                      onPress={() => handleCancelInvitation(invitation.id)}
+                    >
+                      <Ionicons name="close-circle-outline" size={20} color="#636E72" />
+                    </TouchableOpacity>
+                  )}
                 </View>
                 );
               })}

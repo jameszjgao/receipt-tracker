@@ -12,6 +12,7 @@ export interface HouseholdInvitation {
   expiresAt: string;
   createdAt: string;
   acceptedAt?: string;
+  householdName?: string; // 可选的家庭名称字段
 }
 
 // 生成邀请token
@@ -161,11 +162,9 @@ async function sendInvitationEmail(email: string, token: string, isExistingUser:
       });
 
       if (!edgeFunctionError) {
-        console.log('Invitation email sent via Edge Function');
         return;
       }
     } catch (edgeError) {
-      console.log('Edge Function not available, trying alternative method:', edgeError);
     }
 
     // 备选方案：使用 Supabase 的邮件功能（需要配置 SMTP）
@@ -189,17 +188,6 @@ async function sendInvitationEmail(email: string, token: string, isExistingUser:
 
       // 临时方案：显示邀请链接（开发/测试用）
       if (isDev) {
-        console.log('=== INVITATION EMAIL (DEV MODE) ===');
-        console.log('To:', email);
-        console.log('Subject: You\'ve been invited to join ' + householdName);
-        console.log('Body:');
-        console.log(`${inviterName} has invited you to join ${householdName} on Snap Receipt.`);
-        console.log('');
-        console.log('Click the link below to accept the invitation:');
-        console.log(inviteUrl);
-        console.log('');
-        console.log('This invitation will expire in 7 days.');
-        console.log('================================');
       }
     } catch (emailError) {
       console.error('Error sending invitation email:', emailError);
@@ -254,49 +242,105 @@ export async function getInvitationByToken(token: string): Promise<HouseholdInvi
   }
 }
 
-// 获取用户待处理的邀请
+// 获取用户待处理的邀请（包含家庭名称）
 export async function getPendingInvitationsForUser(): Promise<HouseholdInvitation[]> {
   try {
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser || !authUser.email) return [];
 
-    // 优先从 users 表获取 email，如果不存在则使用 auth 用户的 email
-    const { data: userData } = await supabase
-      .from('users')
-      .select('email')
-      .eq('id', authUser.id)
-      .maybeSingle();
-
-    // 使用 users 表的 email 或 auth 用户的 email
-    const userEmail = userData?.email || authUser.email;
+    // 优先从 users 表获取 email，如果不存在或查询失败则使用 auth 用户的 email
+    let userEmail = authUser.email;
+    try {
+      const { data: userData } = await supabase
+        .from('users')
+        .select('email')
+        .eq('id', authUser.id)
+        .maybeSingle();
+      
+      if (userData?.email) {
+        userEmail = userData.email;
+      }
+    } catch (userQueryError) {
+      // 使用 auth 用户的 email 继续
+    }
     if (!userEmail) return [];
 
-    const { data, error } = await supabase
-      .from('household_invitations')
-      .select('*')
-      .eq('invitee_email', userEmail.toLowerCase())
-      .eq('status', 'pending')
-      .gt('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: false });
+    // 通过 join 查询邀请和家庭信息
+    // 如果 join 查询失败（可能是 RLS 策略问题），尝试只查询邀请，不 join 家庭信息
+    let data: any[] | null = null;
+    let error: any = null;
+    
+    try {
+      const result = await supabase
+        .from('household_invitations')
+        .select(`
+          *,
+          households (
+            id,
+            name
+          )
+        `)
+        .eq('invitee_email', userEmail.toLowerCase())
+        .eq('status', 'pending')
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: false });
+      
+      data = result.data;
+      error = result.error;
+    } catch (joinError: any) {
+      // 如果 join 查询失败（可能是 RLS 策略问题），尝试只查询邀请表
+      try {
+        const fallbackResult = await supabase
+          .from('household_invitations')
+          .select('*')
+          .eq('invitee_email', userEmail.toLowerCase())
+          .eq('status', 'pending')
+          .gt('expires_at', new Date().toISOString())
+          .order('created_at', { ascending: false });
+        
+        data = fallbackResult.data;
+        error = fallbackResult.error;
+      } catch (fallbackError) {
+        return [];
+      }
+    }
 
     if (error) {
-      console.error('Error getting pending invitations:', error);
+      // 如果是权限错误，记录详细信息
+      if (error.code === '42501' || error.message?.includes('permission denied')) {
+        console.error('Permission error getting invitations');
+      } else {
+        console.error('Error getting pending invitations:', error);
+      }
       return [];
     }
 
     if (!data) return [];
 
-    return data.map((row: any) => ({
-      id: row.id,
-      householdId: row.household_id,
-      inviterId: row.inviter_id,
-      inviteeEmail: row.invitee_email,
-      token: row.token,
-      status: row.status,
-      expiresAt: row.expires_at,
-      createdAt: row.created_at,
-      acceptedAt: row.accepted_at,
-    }));
+    return data.map((row: any) => {
+      // 提取家庭名称（可能是对象或数组）
+      let householdName: string | undefined = undefined;
+      if (row.households) {
+        if (Array.isArray(row.households) && row.households.length > 0) {
+          householdName = row.households[0].name;
+        } else if (typeof row.households === 'object' && row.households.name) {
+          householdName = row.households.name;
+        }
+      }
+
+      return {
+        id: row.id,
+        householdId: row.household_id,
+        inviterId: row.inviter_id,
+        inviteeEmail: row.invitee_email,
+        token: row.token,
+        status: row.status,
+        expiresAt: row.expires_at,
+        createdAt: row.created_at,
+        acceptedAt: row.accepted_at,
+        householdName: householdName, // 添加家庭名称字段
+      };
+    });
   } catch (error) {
     console.error('Error getting pending invitations for user:', error);
     return [];

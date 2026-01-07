@@ -99,16 +99,29 @@ export default function HomeScreen() {
 
   const continueAuthCheck = async () => {
     // 优先检查是否有待处理的邀请（在进入应用之前处理）
-    const invitations = await getPendingInvitationsForUser();
+    // 如果查询邀请失败（可能是权限错误），则跳过邀请检查，继续正常流程
+    let invitations: any[] = [];
+    try {
+      invitations = await getPendingInvitationsForUser();
+    } catch (invError) {
+      // 权限错误不影响主流程，继续
+    }
     
     if (invitations.length > 0) {
-      // 有邀请，跳转到设置家庭页面显示邀请对话框
-      router.replace('/setup-household');
+      // 有邀请，跳转到邀请处理页面
+      router.replace('/handle-invitations');
       return;
     }
 
     // 检查用户是否有当前家庭（使用缓存，如果缓存未初始化则从数据库读取）
-    const user = await getCurrentUser();
+    // 如果获取用户失败，跳转到设置家庭页面
+    let user;
+    try {
+      user = await getCurrentUser();
+    } catch (userError) {
+      router.replace('/setup-household');
+      return;
+    }
     if (!user) {
       router.replace('/setup-household');
       return;
