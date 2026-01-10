@@ -170,9 +170,10 @@ export default function HandleInvitationsScreen() {
 
       // 老用户：有家庭
       // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用（登录到上次登录的家庭）
+      // 即使有 pending invitations，也允许用户进入应用（用户可以通过 Later 按钮忽略邀请）
       if (user.currentHouseholdId || user.householdId) {
         const targetHouseholdId = user.currentHouseholdId || user.householdId;
-        console.log('continueAfterInvitations: User has current household, redirecting to home:', targetHouseholdId);
+        console.log('continueAfterInvitations: User has current household, redirecting to home (ignoring pending invitations):', targetHouseholdId);
         
         // 确保缓存已更新
         try {
@@ -341,6 +342,55 @@ export default function HandleInvitationsScreen() {
     setInviteId(null);
     setInviteHouseholdId(null);
     
+    // 检查用户是否已有关联家庭
+    try {
+      const user = await getCurrentUser(true);
+      const households = await getUserHouseholds();
+      
+      // 如果用户已有关联家庭，直接跳转到 index（忽略 pending invitations）
+      if (households.length > 0) {
+        // 如果有当前家庭，直接进入
+        if (user?.currentHouseholdId || user?.householdId) {
+          console.log('handleLaterInvitation: User has current household, redirecting to index');
+          // 更新缓存
+          try {
+            const updatedHousehold = await getCurrentHousehold(true);
+            await initializeAuthCache(user, updatedHousehold);
+          } catch (cacheError) {
+            console.warn('handleLaterInvitation: Cache update failed, continuing:', cacheError);
+          }
+          router.replace('/');
+          return;
+        }
+        
+        // 如果只有一个家庭，自动设置并进入
+        if (households.length === 1) {
+          console.log('handleLaterInvitation: Setting single household and redirecting to index');
+          await setCurrentHousehold(households[0].householdId);
+          // 更新缓存
+          try {
+            const updatedUser = await getCurrentUser(true);
+            const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
+            await initializeAuthCache(updatedUser, updatedHousehold);
+          } catch (cacheError) {
+            console.warn('handleLaterInvitation: Cache update failed, continuing:', cacheError);
+          }
+          router.replace('/');
+          return;
+        }
+        
+        // 多个家庭，跳转到家庭选择页面
+        if (households.length > 1) {
+          console.log('handleLaterInvitation: Multiple households, redirecting to household-select');
+          router.replace('/household-select');
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error checking user households in handleLaterInvitation:', error);
+    }
+    
+    // 如果没有家庭，继续处理邀请或跳转到 setup-household
     // 检查是否还有更多邀请
     const nextIndex = currentInvitationIndex + 1;
     if (nextIndex < pendingInvitations.length) {
@@ -349,11 +399,11 @@ export default function HandleInvitationsScreen() {
       setCurrentInvitationIndex(nextIndex);
       showNextInvitation(nextIndex, pendingInvitations);
     } else {
-      // 所有邀请都处理完了，直接继续流程（会登录到上次登录的家庭）
-      console.log('handleLaterInvitation: All invitations processed, continuing to login');
+      // 所有邀请都处理完了，跳转到 setup-household（新用户需要创建家庭）
+      console.log('handleLaterInvitation: All invitations processed, redirecting to setup-household');
       setPendingInvitations([]);
       setCurrentInvitationIndex(0);
-      await continueAfterInvitations();
+      router.replace('/setup-household');
     }
   };
 
@@ -376,73 +426,7 @@ export default function HandleInvitationsScreen() {
     <View style={styles.container}>
       <StatusBar style="dark" />
       
-      {/* 显示层叠的邀请卡片（如果有多个邀请且没有打开modal） */}
-      {pendingInvitations.length > 0 && !showInviteModal && (
-        <View style={styles.stackedCardsContainer}>
-          {pendingInvitations.slice(currentInvitationIndex, currentInvitationIndex + 3).map((invitation, idx) => {
-            const actualIndex = currentInvitationIndex + idx;
-            const isTopCard = idx === 0;
-            const remainingCount = pendingInvitations.length - actualIndex;
-            const cardOpacity = 1 - idx * 0.4;
-            const cardScale = 1 - idx * 0.08;
-            const cardTranslateY = idx * 12;
-            const shadowOpacity = idx === 0 ? 0.15 : 0.08;
-            const cardElevation = idx === 0 ? 5 : 2;
-            
-            return (
-              <TouchableOpacity
-                key={invitation.id}
-                style={[
-                  styles.stackedCard,
-                  { 
-                    zIndex: 100 - idx, // 确保顶层卡片在最上面
-                    transform: [{ translateY: cardTranslateY }, { scale: cardScale }],
-                    opacity: cardOpacity,
-                    shadowOpacity: shadowOpacity,
-                    elevation: cardElevation,
-                  }
-                ]}
-                onPress={() => {
-                  if (isTopCard) {
-                    showNextInvitation(actualIndex, pendingInvitations);
-                  }
-                }}
-                disabled={!isTopCard}
-                activeOpacity={isTopCard ? 0.7 : 1}
-              >
-                <View style={styles.stackedCardContent}>
-                  <View style={styles.stackedCardIconContainer}>
-                    <Ionicons name="people" size={28} color="#6C5CE7" />
-                    {remainingCount > 1 && isTopCard && (
-                      <View style={styles.badgeContainer}>
-                        <Text style={styles.badgeText}>{remainingCount}</Text>
-                      </View>
-                    )}
-                  </View>
-                  <View style={styles.stackedCardInfo}>
-                    <Text style={styles.stackedCardName}>{invitation.name || 'Unknown Household'}</Text>
-                    <Text style={styles.stackedCardEmail}>
-                      {invitation.inviterEmail || 'Someone'} invited you
-                    </Text>
-                  </View>
-                  {isTopCard && (
-                    <Ionicons name="chevron-forward" size={20} color="#636E72" />
-                  )}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      )}
-      
-      {/* 如果没有更多邀请且没有打开modal，显示提示 */}
-      {pendingInvitations.length === 0 && !showInviteModal && !loading && (
-        <View style={styles.emptyStateContainer}>
-          <Text style={styles.emptyStateText}>No pending invitations</Text>
-        </View>
-      )}
-      
-      {/* 邀请确认浮窗 */}
+      {/* 邀请确认浮窗 - 支持层叠卡片 */}
       <Modal
         visible={showInviteModal}
         transparent={true}
@@ -450,67 +434,145 @@ export default function HandleInvitationsScreen() {
         onRequestClose={handleDeclineInvitation}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Ionicons name="people" size={48} color="#6C5CE7" />
-              <Text style={styles.modalTitle}>Invitation to Join</Text>
-            </View>
-            {/* 明确显示家庭名称 */}
-            <View style={styles.householdNameContainer}>
-              <Text style={styles.householdNameLabel}>Household:</Text>
-              <Text style={styles.householdNameText}>
-                {householdName || 'Unknown Household'}
-              </Text>
-            </View>
-            <Text style={styles.modalText}>
-              {inviterEmail ? (
-                <>
-                  <Text style={styles.inviterEmailText}>{inviterEmail}</Text> has invited you to join this household.
-                </>
-              ) : (
-                'You have been invited to join this household.'
-              )}
-            </Text>
-            <Text style={styles.modalSubtext}>
-              Do you want to join this household?
-            </Text>
-            {/* 显示剩余邀请数量（如果有多个邀请） */}
-            {pendingInvitations.length > 1 && (
-              <Text style={styles.remainingInvitationsText}>
-                {pendingInvitations.length - currentInvitationIndex - 1} more invitation(s) waiting
-              </Text>
+          <View style={styles.modalContentContainer}>
+            {/* 如果有多个邀请，显示层叠卡片效果 */}
+            {pendingInvitations.length > 1 && currentInvitationIndex < pendingInvitations.length - 1 && (
+              <View style={styles.stackedCardsWrapper}>
+                {pendingInvitations.slice(currentInvitationIndex + 1, Math.min(currentInvitationIndex + 4, pendingInvitations.length)).map((invitation, index) => (
+                  <View
+                    key={invitation.id}
+                    style={[
+                      styles.stackedCardBack,
+                      {
+                        transform: [
+                          { translateY: (index + 1) * 8 },
+                          { scale: 1 - (index + 1) * 0.05 },
+                        ],
+                        zIndex: -index - 1,
+                        opacity: 0.5 - index * 0.15,
+                      },
+                    ]}
+                  />
+                ))}
+              </View>
             )}
-            <View style={styles.modalButtons}>
-              {/* 第一个按钮：接受 */}
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonAccept, acceptingInvite && styles.buttonDisabled]}
-                onPress={handleAcceptInvitation}
-                disabled={acceptingInvite}
-              >
-                {acceptingInvite ? (
-                  <ActivityIndicator color="#fff" />
+            
+            {/* 当前邀请卡片 */}
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                {/* 顶部一行：左箭头、icon+序号、右箭头 */}
+                <View style={styles.modalHeaderTop}>
+                  {/* 左箭头 */}
+                  {pendingInvitations.length > 1 ? (
+                    <TouchableOpacity
+                      style={[styles.navButtonInline, currentInvitationIndex === 0 && styles.navButtonDisabled]}
+                      onPress={() => {
+                        if (currentInvitationIndex > 0) {
+                          const prevIndex = currentInvitationIndex - 1;
+                          setCurrentInvitationIndex(prevIndex);
+                          showNextInvitation(prevIndex, pendingInvitations);
+                        }
+                      }}
+                      disabled={currentInvitationIndex === 0 || acceptingInvite}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons 
+                        name="chevron-back" 
+                        size={24} 
+                        color={currentInvitationIndex === 0 ? "#D1D5DB" : "#6C5CE7"} 
+                      />
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.navButtonPlaceholder} />
+                  )}
+                  
+                  {/* Icon和序号（整体显示） */}
+                  <View style={styles.iconWithCounter}>
+                    <Ionicons name="mail-outline" size={48} color="#6C5CE7" />
+                    {pendingInvitations.length > 1 && (
+                      <View style={styles.invitationCounterBadge}>
+                        <Text style={styles.invitationCounterText}>
+                          {currentInvitationIndex + 1}/{pendingInvitations.length}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  
+                  {/* 右箭头 */}
+                  {pendingInvitations.length > 1 ? (
+                    <TouchableOpacity
+                      style={[styles.navButtonInline, currentInvitationIndex >= pendingInvitations.length - 1 && styles.navButtonDisabled]}
+                      onPress={() => {
+                        if (currentInvitationIndex < pendingInvitations.length - 1) {
+                          const nextIndex = currentInvitationIndex + 1;
+                          setCurrentInvitationIndex(nextIndex);
+                          showNextInvitation(nextIndex, pendingInvitations);
+                        }
+                      }}
+                      disabled={currentInvitationIndex >= pendingInvitations.length - 1 || acceptingInvite}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons 
+                        name="chevron-forward" 
+                        size={24} 
+                        color={currentInvitationIndex >= pendingInvitations.length - 1 ? "#D1D5DB" : "#6C5CE7"} 
+                      />
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.navButtonPlaceholder} />
+                  )}
+                </View>
+                <Text style={styles.modalTitle}>New Invitation</Text>
+              </View>
+              {/* 突出显示邀请者email */}
+              <View style={styles.inviterEmailContainer}>
+                {inviterEmail ? (
+                  <Text style={styles.inviterEmailMain}>{inviterEmail}</Text>
                 ) : (
-                  <Text style={styles.modalButtonAcceptText}>Accept</Text>
+                  <Text style={styles.inviterEmailMain}>Someone</Text>
                 )}
-              </TouchableOpacity>
-              
-              {/* 第二个按钮：拒绝 */}
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonDecline]}
-                onPress={handleDeclineInvitation}
-                disabled={acceptingInvite}
-              >
-                <Text style={styles.modalButtonDeclineText}>Decline</Text>
-              </TouchableOpacity>
-              
-              {/* 第三个按钮：后续处理 */}
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonLater]}
-                onPress={handleLaterInvitation}
-                disabled={acceptingInvite}
-              >
-                <Text style={styles.modalButtonLaterText}>Deal with Later</Text>
-              </TouchableOpacity>
+                <Text style={styles.inviterEmailLabel}>has invited you to join Household</Text>
+              </View>
+              <View style={styles.modalButtons}>
+                {/* 第一个按钮：接受 - 主要操作按钮，绿色，突出 */}
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonAccept, acceptingInvite && styles.buttonDisabled]}
+                  onPress={handleAcceptInvitation}
+                  disabled={acceptingInvite}
+                  activeOpacity={0.8}
+                >
+                  {acceptingInvite ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-circle" size={20} color="#fff" style={{ marginRight: 8 }} />
+                      <Text style={styles.modalButtonAcceptText}>Accept</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                
+                {/* 第二个按钮：拒绝 - 次要操作按钮，红色边框，危险操作 */}
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonDecline]}
+                  onPress={handleDeclineInvitation}
+                  disabled={acceptingInvite}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="close-circle-outline" size={20} color="#E74C3C" style={{ marginRight: 8 }} />
+                  <Text style={styles.modalButtonDeclineText}>Decline</Text>
+                </TouchableOpacity>
+                
+                {/* 第三个按钮：后续处理 - 最轻的操作按钮，灰色，最低优先级 */}
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonLater]}
+                  onPress={handleLaterInvitation}
+                  disabled={acceptingInvite}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="time-outline" size={18} color="#95A5A6" style={{ marginRight: 6 }} />
+                  <Text style={styles.modalButtonLaterText}>Deal with Later</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </View>
@@ -584,6 +646,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
   },
+  modalContentContainer: {
+    width: '100%',
+    maxWidth: 400,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  stackedCardsWrapper: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  stackedCardBack: {
+    position: 'absolute',
+    width: '100%',
+    maxWidth: 400,
+    height: 'auto',
+    minHeight: 200,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 2,
+  },
   modalContent: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -591,134 +684,101 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 400,
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    zIndex: 10,
+    position: 'relative',
   },
   modalHeader: {
     alignItems: 'center',
     marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2D3436',
-    marginTop: 12,
-  },
-  modalText: {
-    fontSize: 16,
-    color: '#636E72',
-    textAlign: 'center',
-    marginBottom: 8,
-    lineHeight: 24,
-  },
-  householdNameContainer: {
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    backgroundColor: '#F0F4FF',
-    borderRadius: 12,
     width: '100%',
   },
-  householdNameLabel: {
-    fontSize: 12,
-    color: '#636E72',
-    textAlign: 'center',
-    marginBottom: 4,
-    fontWeight: '500',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  householdNameText: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#6C5CE7',
-    textAlign: 'center',
-  },
-  inviterEmailText: {
-    fontWeight: '600',
-    color: '#2D3436',
-  },
-  modalSubtext: {
-    fontSize: 14,
-    color: '#95A5A6',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  remainingInvitationsText: {
-    fontSize: 12,
-    color: '#6C5CE7',
-    textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 16,
-    fontWeight: '500',
-  },
-  stackedCardsContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 100,
-    paddingBottom: 100,
-    position: 'relative',
-  },
-  stackedCard: {
-    position: 'absolute',
-    width: '90%',
-    maxWidth: 380,
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 24,
-    borderWidth: 1,
-    borderColor: '#E9ECEF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 12,
-  },
-  stackedCardContent: {
+  modalHeaderTop: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 12,
+    paddingHorizontal: 8,
   },
-  stackedCardIconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+  navButtonInline: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: '#F0F4FF',
     justifyContent: 'center',
     alignItems: 'center',
-    position: 'relative',
+    borderWidth: 1,
+    borderColor: '#E0E7FF',
   },
-  badgeContainer: {
+  navButtonPlaceholder: {
+    width: 48,
+    height: 48,
+  },
+  navButtonDisabled: {
+    backgroundColor: '#F8F9FA',
+    borderColor: '#E9ECEF',
+  },
+  iconWithCounter: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  invitationCounterBadge: {
     position: 'absolute',
-    top: -4,
-    right: -4,
+    top: -6,
+    right: -12,
     backgroundColor: '#6C5CE7',
-    borderRadius: 12,
-    minWidth: 24,
-    height: 24,
+    borderRadius: 11,
+    minWidth: 36,
+    height: 22,
+    paddingHorizontal: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 6,
     borderWidth: 2,
     borderColor: '#fff',
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
   },
-  badgeText: {
-    color: '#fff',
+  invitationCounterText: {
     fontSize: 12,
     fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+    letterSpacing: 0.3,
   },
-  stackedCardInfo: {
-    flex: 1,
-    marginLeft: 16,
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: '600',
+    color: '#2D3436',
+    marginTop: 0,
+    marginBottom: 0,
   },
-  stackedCardName: {
+  inviterEmailContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    width: '100%',
+  },
+  inviterEmailMain: {
     fontSize: 20,
     fontWeight: '700',
     color: '#2D3436',
+    textAlign: 'center',
     marginBottom: 6,
   },
-  stackedCardEmail: {
+  inviterEmailLabel: {
     fontSize: 14,
     color: '#636E72',
-    lineHeight: 20,
+    textAlign: 'center',
   },
   emptyStateContainer: {
     flex: 1,
@@ -735,52 +795,59 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     width: '100%',
     marginTop: 8,
+    gap: 10,
   },
   modalButton: {
     width: '100%',
-    paddingVertical: 14,
+    paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 52,
-    marginBottom: 12,
+    minHeight: 56,
+    flexDirection: 'row',
   },
-  modalButtonDecline: {
-    backgroundColor: '#F8F9FA',
-    borderWidth: 1,
-    borderColor: '#E9ECEF',
-  },
-  modalButtonDeclineText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#636E72',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  modalButtonLater: {
-    backgroundColor: '#F8F9FA',
-    borderWidth: 1,
-    borderColor: '#E9ECEF',
-    marginBottom: 0, // 最后一个按钮不需要底部间距
-  },
-  modalButtonLaterText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#636E72',
-  },
+  // Accept 按钮 - 主要操作，绿色，突出显示
   modalButtonAccept: {
-    backgroundColor: '#6C5CE7',
-    shadowColor: '#6C5CE7',
+    backgroundColor: '#27AE60',
+    shadowColor: '#27AE60',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 5,
+    marginBottom: 4,
   },
   modalButtonAcceptText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 0.5,
+  },
+  // Decline 按钮 - 次要操作，红色边框，危险操作
+  modalButtonDecline: {
+    backgroundColor: '#FFF5F5',
+    borderWidth: 2,
+    borderColor: '#E74C3C',
+    marginBottom: 4,
+  },
+  modalButtonDeclineText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: '#E74C3C',
+  },
+  // Later 按钮 - 最轻的操作，灰色，最低优先级
+  modalButtonLater: {
+    backgroundColor: '#F8F9FA',
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+    marginBottom: 0,
+  },
+  modalButtonLaterText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#95A5A6',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
 });
 

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, ActivityIndicator, Alert, ScrollView, TextInput } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { isAuthenticated, getCurrentUser, getCurrentHousehold, setCurrentHousehold, getUserHouseholds, createHousehold } from '@/lib/auth';
@@ -19,6 +19,7 @@ export default function HomeScreen() {
   const [newHouseholdName, setNewHouseholdName] = useState('');
   const [newHouseholdAddress, setNewHouseholdAddress] = useState('');
   const [creating, setCreating] = useState(false);
+  const [pendingInvitationsCount, setPendingInvitationsCount] = useState(0);
 
   useEffect(() => {
     checkAuth();
@@ -98,25 +99,10 @@ export default function HomeScreen() {
   };
 
   const continueAuthCheck = async () => {
-    // 流程：登录成功 -> 判断是否被邀请 -> 无邀请或拒绝邀请 -> 判断是否已关联家庭 -> 有关联家庭 -> 进入上次登录的家庭的index
+    // 流程：登录成功 -> 判断是否已关联家庭 -> 有关联家庭 -> 进入上次登录的家庭的index
+    // 如果用户已有关联家庭，即使有 pending invitations，也允许进入应用（用户可以通过 Later 按钮忽略邀请）
     
-    // 首先检查是否有待处理的邀请（处理邀请应在index之前）
-    try {
-      const { getPendingInvitationsForUser } = await import('@/lib/household-invitations');
-      const invitations = await getPendingInvitationsForUser();
-      
-      if (invitations.length > 0) {
-        // 有邀请，跳转到邀请处理页面（handle-invitations会处理后续流程）
-        console.log('Index: Found pending invitations, redirecting to handle-invitations');
-        router.replace('/handle-invitations');
-        return;
-      }
-    } catch (invError) {
-      // 邀请检查失败不影响流程，静默继续
-      console.log('Index: Invitation check failed (non-blocking):', invError);
-    }
-
-    // 无邀请或拒绝邀请后，检查用户是否有当前家庭（使用缓存，如果缓存未初始化则从数据库读取）
+    // 首先检查用户是否有当前家庭（使用缓存，如果缓存未初始化则从数据库读取）
     let user;
     try {
       user = await getCurrentUser(true); // 强制刷新，确保获取最新的currentHouseholdId
@@ -133,8 +119,9 @@ export default function HomeScreen() {
     }
 
     // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用（进入上次登录的家庭）
+    // 即使有 pending invitations，也允许进入应用（用户可以通过 setup-household 页面的 Invitations 按钮处理）
     if (user.currentHouseholdId || user.householdId) {
-      console.log('Index: User has current household, entering app');
+      console.log('Index: User has current household, entering app (pending invitations can be handled later)');
       setIsLoggedIn(true);
       return;
     }
@@ -143,8 +130,25 @@ export default function HomeScreen() {
     const { getUserHouseholds } = await import('@/lib/auth');
     const households = await getUserHouseholds();
     
-    // 新用户：没有家庭，跳转到设置家庭页面（创建家庭）
+    // 新用户：没有家庭，检查是否有待处理的邀请
     if (households.length === 0) {
+      // 检查是否有待处理的邀请（新用户需要处理邀请）
+      try {
+        const { getPendingInvitationsForUser } = await import('@/lib/household-invitations');
+        const invitations = await getPendingInvitationsForUser();
+        
+        if (invitations.length > 0) {
+          // 新用户有邀请，跳转到邀请处理页面
+          console.log('Index: New user with pending invitations, redirecting to handle-invitations');
+          router.replace('/handle-invitations');
+          return;
+        }
+      } catch (invError) {
+        // 邀请检查失败不影响流程，静默继续
+        console.log('Index: Invitation check failed (non-blocking):', invError);
+      }
+      
+      // 新用户没有邀请，跳转到设置家庭页面（创建家庭）
       console.log('Index: No households, redirecting to setup-household');
       router.replace('/setup-household');
       return;
@@ -170,14 +174,82 @@ export default function HomeScreen() {
     }
   };
 
+  const checkPendingInvitations = async () => {
+    // 只有已登录的用户才检查 pending invitations
+    if (!isLoggedIn) {
+      setPendingInvitationsCount(0);
+      return;
+    }
+
+    try {
+      const invitations = await getPendingInvitationsForUser();
+      setPendingInvitationsCount(invitations.length);
+    } catch (error) {
+      console.error('Error checking pending invitations:', error);
+      // 静默失败，不影响页面显示
+      setPendingInvitationsCount(0);
+    }
+  };
+
   useEffect(() => {
     if (isLoggedIn) {
       loadHousehold();
+      // checkPendingInvitations 已在 loadHousehold 中调用
+    } else {
+      setPendingInvitationsCount(0);
     }
   }, [isLoggedIn]);
 
-  // 移除 useFocusEffect，数据已在登录时缓存，不需要每次获得焦点都重新加载
-  // useFocusEffect 已移除，避免重复从数据库读取
+  // 使用 useFocusEffect 在页面获得焦点时检查 pending invitations（用于从其他页面返回时刷新）
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) {
+        checkPendingInvitations();
+      }
+    }, [isLoggedIn])
+  );
+
+  // 添加路由守卫：每次页面获得焦点时检查用户是否有家庭（防止通过回退路径进入）
+  useFocusEffect(
+    useCallback(() => {
+      const checkUserHousehold = async () => {
+        // 如果还没有完成登录检查，跳过
+        if (isLoggedIn === null) {
+          return;
+        }
+        
+        // 如果已登录，检查用户是否有家庭
+        if (isLoggedIn) {
+          try {
+            const user = await getCurrentUser(true);
+            if (!user) {
+              router.replace('/setup-household');
+              return;
+            }
+            
+            // 检查用户是否有家庭
+            const households = await getUserHouseholds();
+            if (households.length === 0) {
+              // 没有家庭，重定向到 setup-household
+              router.replace('/setup-household');
+              return;
+            }
+            
+            // 如果有家庭但没有当前家庭，也重定向到 setup-household
+            if (!user.currentHouseholdId && !user.householdId) {
+              router.replace('/setup-household');
+              return;
+            }
+          } catch (error) {
+            console.error('Error checking user household in focus effect:', error);
+            router.replace('/setup-household');
+          }
+        }
+      };
+      
+      checkUserHousehold();
+    }, [isLoggedIn, router])
+  );
 
   const loadHousehold = async () => {
     try {
@@ -185,8 +257,8 @@ export default function HomeScreen() {
       const household = await getCurrentHousehold();
       setCurrentHouseholdState(household);
       
-      // 移除邀请检查逻辑，邀请已在 continueAuthCheck 中处理
-      // 避免进入 index 后再次显示邀请对话框
+      // 加载家庭后检查 pending invitations（已有关联家庭的用户）
+      await checkPendingInvitations();
     } catch (error) {
       console.error('Error loading household:', error);
     }
@@ -348,7 +420,22 @@ export default function HomeScreen() {
       
       {/* 顶部栏：家庭名称和管理入口 */}
       <View style={styles.topBar}>
-        <View style={styles.topBarLeft} />
+        <View style={styles.topBarLeft}>
+          {pendingInvitationsCount > 0 && (
+            <TouchableOpacity
+              style={styles.invitationsBadgeButton}
+              onPress={() => router.push('/handle-invitations')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="mail-outline" size={24} color="#6C5CE7" />
+              <View style={styles.invitationsBadge}>
+                <Text style={styles.invitationsBadgeText}>
+                  {pendingInvitationsCount > 99 ? '99+' : pendingInvitationsCount}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )}
+        </View>
         <TouchableOpacity
           style={styles.householdNameContainer}
           onPress={openHouseholdSwitch}
@@ -567,6 +654,36 @@ const styles = StyleSheet.create({
   },
   topBarLeft: {
     width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+  invitationsBadgeButton: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  invitationsBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#E74C3C',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  invitationsBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   householdNameContainer: {
     flex: 1,

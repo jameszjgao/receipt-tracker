@@ -14,7 +14,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { createHousehold, getCurrentUser, getUserHouseholds } from '@/lib/auth';
+import { createHousehold, getCurrentUser, getUserHouseholds, signOut } from '@/lib/auth';
 import { getPendingInvitationsForUser, acceptInvitation, declineInvitation, HouseholdInvitation } from '@/lib/household-invitations';
 import { supabase } from '@/lib/supabase';
 import { initializeAuthCache } from '@/lib/auth-cache';
@@ -78,15 +78,9 @@ export default function SetupHouseholdScreen() {
       
       setHouseholdNames(names);
 
-      // 如果有邀请，默认显示邀请模式；否则显示创建模式
-      if (invitations.length > 0) {
-        setMode('invite');
-        if (invitations.length === 1) {
-          setSelectedInvitation(invitations[0]);
-        }
-      } else {
-        setMode('create');
-      }
+      // 始终优先显示创建模式（首位展示创建新家庭）
+      // 如果有邀请，可以通过按钮切换到邀请模式
+      setMode('create');
     } catch (error) {
       console.error('Error loading invitations:', error);
       setMode('create');
@@ -236,6 +230,37 @@ export default function SetupHouseholdScreen() {
     }
   };
 
+  const handleSignOut = async () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await signOut();
+              if (error) {
+                Alert.alert('Error', error.message || 'Failed to sign out');
+                return;
+              }
+              // 退出成功后跳转到登录页面
+              router.replace('/login');
+            } catch (error) {
+              console.error('Error signing out:', error);
+              Alert.alert('Error', 'Failed to sign out');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -266,82 +291,10 @@ export default function SetupHouseholdScreen() {
             </View>
           </View>
           <Text style={styles.title}>Setup Household</Text>
-          <Text style={styles.subtitle}>
-            {mode === 'invite' 
-              ? 'You have pending invitations' 
-              : 'Create your household to get started'}
-          </Text>
+          <Text style={styles.subtitle}>Create your household to get started</Text>
         </View>
 
-        {/* 邀请模式 */}
-        {mode === 'invite' && pendingInvitations.length > 0 && (
-          <View style={styles.invitationsSection}>
-            <Text style={styles.sectionTitle}>Pending Invitations</Text>
-            {pendingInvitations.map((invitation) => (
-              <View key={invitation.id} style={styles.invitationCard}>
-                <View style={styles.invitationHeader}>
-                  <Ionicons name="people" size={24} color="#6C5CE7" />
-                  <View style={styles.invitationInfo}>
-                    <Text style={styles.invitationHouseholdName}>
-                      {householdNames[invitation.householdId] || 'Unknown Household'}
-                    </Text>
-                    <Text style={styles.invitationText}>
-                      You've been invited to join this household
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.invitationButtons}>
-                  {/* 第一个按钮：接受 */}
-                  <TouchableOpacity
-                    style={[styles.invitationButton, styles.acceptButton, accepting && styles.buttonDisabled]}
-                    onPress={() => handleAcceptInvitation(invitation)}
-                    disabled={accepting}
-                  >
-                    {accepting ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.acceptButtonText}>Accept</Text>
-                    )}
-                  </TouchableOpacity>
-                  
-                  {/* 第二个按钮：拒绝 */}
-                  <TouchableOpacity
-                    style={[styles.invitationButton, styles.declineButton]}
-                    onPress={() => handleDeclineInvitation(invitation)}
-                    disabled={accepting}
-                  >
-                    <Text style={styles.declineButtonText}>Decline</Text>
-                  </TouchableOpacity>
-                  
-                  {/* 第三个按钮：后续处理 */}
-                  <TouchableOpacity
-                    style={[styles.invitationButton, styles.laterButton]}
-                    onPress={() => {
-                      // 后续处理：关闭邀请模式，切换到创建模式
-                      setMode('create');
-                    }}
-                    disabled={accepting}
-                  >
-                    <Text style={styles.laterButtonText}>Deal with Later</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-            
-            {pendingInvitations.length > 0 && (
-              <TouchableOpacity
-                style={styles.switchModeButton}
-                onPress={() => setMode('create')}
-              >
-                <Text style={styles.switchModeText}>
-                  Or create your own household
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {/* 创建模式 */}
+        {/* 创建模式 - 首位展示 */}
         {mode === 'create' && (
           <View style={styles.createSection}>
             <View style={styles.inputContainer}>
@@ -352,20 +305,19 @@ export default function SetupHouseholdScreen() {
                 placeholderTextColor="#95A5A6"
                 value={newHouseholdName}
                 onChangeText={setNewHouseholdName}
-                autoFocus
               />
             </View>
 
-            <View style={styles.inputContainer}>
-              <Ionicons name="location-outline" size={20} color="#636E72" style={styles.inputIcon} />
+            <View style={[styles.inputContainer, styles.addressInputContainer]}>
+              <Ionicons name="location-outline" size={20} color="#636E72" style={styles.addressInputIcon} />
               <TextInput
-                style={[styles.input, styles.multilineInput]}
+                style={[styles.input, styles.addressInput]}
                 placeholder="Address (Optional)"
                 placeholderTextColor="#95A5A6"
                 value={newHouseholdAddress}
                 onChangeText={setNewHouseholdAddress}
                 multiline
-                numberOfLines={3}
+                textAlignVertical="top"
               />
             </View>
 
@@ -374,25 +326,38 @@ export default function SetupHouseholdScreen() {
               onPress={handleCreateHousehold}
               disabled={creating || !newHouseholdName.trim()}
             >
-              {creating ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.createButtonText}>Create Household</Text>
-              )}
-            </TouchableOpacity>
-
-            {pendingInvitations.length > 0 && (
-              <TouchableOpacity
-                style={styles.switchModeButton}
-                onPress={() => setMode('invite')}
-              >
-                <Text style={styles.switchModeText}>
-                  Or accept an invitation ({pendingInvitations.length})
-                </Text>
-              </TouchableOpacity>
+            {creating ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.createButtonText}>Create Household</Text>
             )}
+          </TouchableOpacity>
           </View>
         )}
+
+        {/* Invitations Button - 如果有pending邀请 */}
+        {pendingInvitations.length > 0 && (
+          <TouchableOpacity
+            style={styles.invitationsButton}
+            onPress={() => router.push('/handle-invitations')}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="mail-outline" size={20} color="#6C5CE7" />
+            <Text style={styles.invitationsButtonText}>
+              Invitations ({pendingInvitations.length})
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Sign Out Button - 底部 */}
+        <TouchableOpacity
+          style={styles.signOutButton}
+          onPress={handleSignOut}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="log-out-outline" size={20} color="#E74C3C" />
+          <Text style={styles.signOutButtonText}>Sign Out</Text>
+        </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -545,8 +510,15 @@ const styles = StyleSheet.create({
     borderColor: '#E9ECEF',
     minHeight: 52,
   },
+  addressInputContainer: {
+    alignItems: 'flex-start',
+  },
   inputIcon: {
     marginRight: 12,
+  },
+  addressInputIcon: {
+    marginRight: 12,
+    marginTop: 2, // 与第一行文字对齐
   },
   input: {
     flex: 1,
@@ -555,8 +527,10 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     minHeight: 24,
   },
-  multilineInput: {
-    minHeight: 80,
+  addressInput: {
+    minHeight: 24,
+    maxHeight: 120, // 限制最大高度，避免占用太多空间
+    paddingTop: 0,
     textAlignVertical: 'top',
   },
   createButton: {
@@ -582,14 +556,39 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.6,
   },
-  switchModeButton: {
+  invitationsButton: {
+    flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    justifyContent: 'center',
+    backgroundColor: '#F0F4FF',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    gap: 8,
+    marginTop: 24,
+    marginBottom: 12,
   },
-  switchModeText: {
-    fontSize: 14,
-    color: '#6C5CE7',
+  invitationsButtonText: {
+    fontSize: 16,
     fontWeight: '600',
+    color: '#6C5CE7',
+  },
+  signOutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF5F5',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    gap: 8,
+    marginTop: 24,
+    marginBottom: 20,
+  },
+  signOutButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#E74C3C',
   },
 });
 
