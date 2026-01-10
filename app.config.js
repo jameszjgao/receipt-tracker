@@ -58,6 +58,9 @@ export default {
     ],
     scheme: 'snapreceipt',
     extra: {
+      eas: {
+        projectId: "b9f86f38-62c6-4bf1-849b-aadccf272d7d"
+      },
       supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
       supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
       geminiApiKey: process.env.GEMINI_API_KEY,
