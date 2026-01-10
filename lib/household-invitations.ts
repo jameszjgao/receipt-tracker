@@ -68,22 +68,114 @@ export async function createInvitation(inviteeEmail: string): Promise<{ invitati
 
     if (rpcError || !invitationId) {
       console.error('Error creating invitation via RPC:', rpcError);
-      // 如果 RPC 函数不存在或失败，回退到直接插入（可能失败）
-      console.log('RPC function failed, falling back to direct insert');
-      const { data: insertResult, error: insertError } = await supabase
+      // 如果 RPC 函数不存在或失败，回退到UPSERT逻辑（先查找，存在则更新，不存在则插入）
+      console.log('RPC function failed, falling back to UPSERT logic');
+      
+      const normalizedEmail = inviteeEmail.toLowerCase().trim();
+      
+      // 先查找是否已存在记录（基于household_id + email）
+      const { data: existingInvitation, error: findError } = await supabase
         .from('household_invitations')
-        .insert(insertData)
-        .select('id')
-        .single();
+        .select('id, status')
+        .eq('household_id', householdId)
+        .ilike('invitee_email', normalizedEmail)  // 使用ilike进行不区分大小写的匹配
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      if (insertError || !insertResult?.id) {
-        return {
-          invitation: null,
-          error: new Error(insertError?.message || rpcError?.message || 'Failed to create invitation'),
-        };
+      let finalInvitationId: string | null = null;
+
+      if (existingInvitation) {
+        // 如果已存在，更新现有记录：重置为pending状态，更新邀请者信息
+        const { data: updateResult, error: updateError } = await supabase
+          .from('household_invitations')
+          .update({
+            status: 'pending',
+            inviter_id: authUser.id,
+            inviter_email: inviterEmail,
+            created_at: createdAt,
+            accepted_at: null,
+          })
+          .eq('id', existingInvitation.id)
+          .select('id')
+          .single();
+
+        if (updateError || !updateResult?.id) {
+          return {
+            invitation: null,
+            error: new Error(updateError?.message || 'Failed to update existing invitation'),
+          };
+        }
+
+        finalInvitationId = updateResult.id;
+        console.log('Updated existing invitation:', finalInvitationId, '(previous status:', existingInvitation.status, ')');
+      } else {
+        // 如果不存在，创建新记录
+        const { data: insertResult, error: insertError } = await supabase
+          .from('household_invitations')
+          .insert(insertData)
+          .select('id')
+          .single();
+
+        if (insertError || !insertResult?.id) {
+          // 如果是唯一约束错误，说明在并发情况下另一条记录已创建，再次查找
+          if (insertError?.code === '23505' || insertError?.message?.includes('unique') || insertError?.message?.includes('duplicate')) {
+            console.log('Unique constraint violation, retrying to find existing invitation');
+            const { data: retryInvitation, error: retryError } = await supabase
+              .from('household_invitations')
+              .select('id')
+              .eq('household_id', householdId)
+              .ilike('invitee_email', normalizedEmail)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .single();
+
+            if (retryError || !retryInvitation?.id) {
+              return {
+                invitation: null,
+                error: new Error('Failed to create or find invitation'),
+              };
+            }
+
+            // 更新刚找到的记录
+            const { data: updateResult, error: updateError } = await supabase
+              .from('household_invitations')
+              .update({
+                status: 'pending',
+                inviter_id: authUser.id,
+                inviter_email: inviterEmail,
+                created_at: createdAt,
+                accepted_at: null,
+              })
+              .eq('id', retryInvitation.id)
+              .select('id')
+              .single();
+
+            if (updateError || !updateResult?.id) {
+              return {
+                invitation: null,
+                error: new Error(updateError?.message || 'Failed to update invitation'),
+              };
+            }
+
+            finalInvitationId = updateResult.id;
+          } else {
+            return {
+              invitation: null,
+              error: new Error(insertError?.message || rpcError?.message || 'Failed to create invitation'),
+            };
+          }
+        } else {
+          finalInvitationId = insertResult.id;
+        }
       }
       
-      const finalInvitationId = insertResult.id;
+      if (!finalInvitationId) {
+        return {
+          invitation: null,
+          error: new Error('Failed to create or find invitation'),
+        };
+      }
       
       // 返回邀请信息
       return {
@@ -91,7 +183,7 @@ export async function createInvitation(inviteeEmail: string): Promise<{ invitati
           id: finalInvitationId,
           householdId: householdId,
           inviterId: authUser.id,
-          inviteeEmail: inviteeEmail.toLowerCase().trim(),
+          inviteeEmail: normalizedEmail,
           status: 'pending',
           createdAt: createdAt,
           acceptedAt: undefined,
@@ -423,6 +515,10 @@ export async function acceptInvitation(invitationId: string): Promise<{ error: E
       return { error: new Error('Email does not match invitation') };
     }
 
+    // 确保基于household_id + email更新记录（而不是仅基于invitationId）
+    // 这样可以确保即使有历史遗留的重复记录，也只会更新正确的那条
+    const normalizedEmail = userEmail.toLowerCase().trim();
+
     // 检查用户是否已经是该家庭的成员
     const { data: existingMember } = await supabase
       .from('user_households')
@@ -432,14 +528,20 @@ export async function acceptInvitation(invitationId: string): Promise<{ error: E
       .single();
 
     if (existingMember) {
-      // 用户已经是成员，只更新邀请状态
-      await supabase
+      // 用户已经是成员，只更新邀请状态（基于household_id + email）
+      const { error: updateError } = await supabase
         .from('household_invitations')
         .update({
           status: 'accepted',
           accepted_at: new Date().toISOString(),
         })
-        .eq('id', invitation.id);
+        .eq('household_id', invitation.householdId)
+        .ilike('invitee_email', normalizedEmail);  // 使用ilike进行不区分大小写的匹配
+
+      if (updateError) {
+        console.error('Error updating invitation status:', updateError);
+        throw updateError;
+      }
 
       // 切换到该家庭（使用 RPC 函数，避免 RLS 权限问题）
       try {
@@ -473,16 +575,20 @@ export async function acceptInvitation(invitationId: string): Promise<{ error: E
 
     if (insertError) throw insertError;
 
-    // 更新邀请状态
+    // 更新邀请状态（基于household_id + email，确保只更新正确的那条记录）
     const { error: updateError } = await supabase
       .from('household_invitations')
       .update({
         status: 'accepted',
         accepted_at: new Date().toISOString(),
       })
-      .eq('id', invitation.id);
+      .eq('household_id', invitation.householdId)
+      .ilike('invitee_email', normalizedEmail);  // 使用ilike进行不区分大小写的匹配
 
-    if (updateError) throw updateError;
+    if (updateError) {
+      console.error('Error updating invitation status:', updateError);
+      throw updateError;
+    }
 
     // 切换到该家庭（使用 RPC 函数，避免 RLS 权限问题）
     try {
@@ -536,12 +642,18 @@ export async function declineInvitation(invitationId: string): Promise<{ error: 
     }
 
     // 更新邀请状态为已拒绝（declined）
+    // 基于household_id + email更新记录，确保只更新正确的那条（即使有历史遗留的重复记录）
+    const normalizedEmail = userEmail.toLowerCase().trim();
     const { error: updateError } = await supabase
       .from('household_invitations')
       .update({ status: 'declined' })
-      .eq('id', invitation.id);
+      .eq('household_id', invitation.householdId)
+      .ilike('invitee_email', normalizedEmail);  // 使用ilike进行不区分大小写的匹配
 
-    if (updateError) throw updateError;
+    if (updateError) {
+      console.error('Error updating invitation status to declined:', updateError);
+      throw updateError;
+    }
 
     return { error: null };
   } catch (error) {
@@ -637,10 +749,10 @@ export async function cancelInvitation(invitationId: string): Promise<{ error: E
       return { error: new Error('Not logged in') };
     }
 
-    // 获取邀请信息
+    // 获取邀请信息（一次查询获取所有需要的信息）
     const { data: invitation, error: fetchError } = await supabase
       .from('household_invitations')
-      .select('household_id, status')
+      .select('household_id, status, invitee_email')
       .eq('id', invitationId)
       .single();
 
@@ -665,12 +777,18 @@ export async function cancelInvitation(invitationId: string): Promise<{ error: E
     }
 
     // 更新邀请状态为已取消
+    // 基于invitationId和household_id更新（双重验证，确保更新正确的记录）
+    // 虽然理论上应该只有一条记录（由于唯一约束），但双重验证可以防止意外更新错误的记录
     const { error: updateError } = await supabase
       .from('household_invitations')
       .update({ status: 'cancelled' })
-      .eq('id', invitationId);
+      .eq('id', invitationId)
+      .eq('household_id', invitation.household_id);  // 额外验证household_id
 
-    if (updateError) throw updateError;
+    if (updateError) {
+      console.error('Error updating invitation status to cancelled:', updateError);
+      throw updateError;
+    }
 
     return { error: null };
   } catch (error) {

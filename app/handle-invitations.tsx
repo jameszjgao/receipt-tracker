@@ -714,10 +714,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#E0E7FF',
+    flexShrink: 0,
   },
   navButtonPlaceholder: {
     width: 48,
     height: 48,
+    flexShrink: 0,
   },
   navButtonDisabled: {
     backgroundColor: '#F8F9FA',
@@ -727,6 +729,7 @@ const styles = StyleSheet.create({
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   invitationCounterBadge: {
     position: 'absolute',
