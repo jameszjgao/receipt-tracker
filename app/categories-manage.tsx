@@ -19,6 +19,7 @@ import {
   deleteCategory,
   Category,
 } from '@/lib/categories';
+import { GradientText } from '@/lib/GradientText';
 
 // 预设颜色列表（减少数量，确保一行显示）
 const COLOR_OPTIONS = [
@@ -150,14 +151,13 @@ export default function CategoriesManageScreen() {
       
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <Ionicons name="arrow-back" size={24} color="#2D3436" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Manage Categories</Text>
-        <View style={styles.headerRight} />
+        <View style={styles.headerTitleContainer}>
+          <GradientText
+            text="Item-level categories, AI-identified automatically."
+            style={styles.headerTitle}
+            containerStyle={styles.gradientTextContainer}
+          />
+        </View>
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
@@ -326,7 +326,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
     paddingTop: 60,
@@ -334,16 +334,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E9ECEF',
   },
-  backButton: {
-    padding: 8,
+  headerTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#2D3436',
+    textAlign: 'center',
   },
-  headerRight: {
-    width: 40,
+  gradientTextContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   scrollView: {
     flex: 1,

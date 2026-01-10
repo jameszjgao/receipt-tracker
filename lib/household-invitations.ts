@@ -244,32 +244,17 @@ export async function getInvitationById(invitationId: string): Promise<Household
 
 // 获取用户待处理的邀请（包含家庭名称）
 // 如果查询失败（如 RLS 权限问题），静默返回空数组，不阻塞登录流程
-/**
- * 判断用户是否被邀请
- * 逻辑：查询邀请列表中是否有pending状态的邀请记录，且被邀请者email与登录者email相同
- * 
- * @returns 返回所有pending状态的邀请记录（invitee_email与当前登录用户email匹配）
- */
 export async function getPendingInvitationsForUser(): Promise<HouseholdInvitation[]> {
   try {
-    // 1. 获取当前登录用户的邮箱（从auth.users表，避免查询users表触发RLS权限检查）
     const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (!authUser || !authUser.email) {
-      console.log('getPendingInvitationsForUser: No authenticated user or email');
-      return [];
-    }
+    if (!authUser || !authUser.email) return [];
 
-    // 2. 规范化用户邮箱（转为小写，确保大小写不敏感匹配）
-    const userEmail = authUser.email.toLowerCase().trim();
-    if (!userEmail) {
-      console.log('getPendingInvitationsForUser: Empty user email after normalization');
-      return [];
-    }
+    // 直接使用 auth.users 的 email，避免查询 users 表触发 RLS 权限检查
+    // RLS 策略会使用 auth.users 表的 email 来匹配 invitee_email
+    const userEmail = authUser.email.toLowerCase();
+    if (!userEmail) return [];
 
-    console.log('getPendingInvitationsForUser: Checking invitations for email:', userEmail);
-
-    // 3. 查询邀请列表：查找invitee_email与登录者email相同且status为pending的记录
-    // 判断逻辑：邀请列表中是否有pending邀请记录的被邀请email与登录者相同的
+    // 直接查询邀请数据（不使用 join，因为 RLS 策略可能阻止 join）
     let data: any[] | null = null;
     let error: any = null;
     
@@ -277,37 +262,29 @@ export async function getPendingInvitationsForUser(): Promise<HouseholdInvitatio
       const result = await supabase
         .from('household_invitations')
         .select('*')
-        .eq('invitee_email', userEmail) // 精确匹配：被邀请者email与登录者email相同
-        .eq('status', 'pending') // 只查询pending状态的邀请
-        .order('created_at', { ascending: false }); // 按创建时间倒序排列
+        .eq('invitee_email', userEmail.toLowerCase())
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
       
       data = result.data;
       error = result.error;
       
-      console.log('getPendingInvitationsForUser: Query result:', {
-        email: userEmail,
-        foundCount: data?.length || 0,
-        hasError: !!error,
-        errorCode: error?.code,
-      });
-      
-      // 4. 处理查询错误（权限错误等，静默返回空数组，不阻塞登录流程）
+      // 如果查询失败（权限错误），静默返回空数组，不阻塞登录流程
       if (error) {
+        // 如果是权限错误，静默处理，不记录错误日志（避免日志噪音）
         if (error.code === '42501' || error.message?.includes('permission denied')) {
-          console.log('getPendingInvitationsForUser: Permission denied (non-blocking)');
+          // 权限错误时，静默返回空数组，不阻塞登录流程
           return [];
         }
-        console.log('getPendingInvitationsForUser: Query failed (non-blocking):', error.code, error.message);
+        // 其他错误也静默处理
+        console.log('Invitations query failed (non-blocking):', error.code);
         return [];
       }
       
-      // 5. 如果没有找到匹配的pending邀请记录，返回空数组（表示用户没有被邀请）
+      // 如果没有数据，直接返回空数组
       if (!data || data.length === 0) {
-        console.log('getPendingInvitationsForUser: No pending invitations found for email:', userEmail);
         return [];
       }
-      
-      console.log('getPendingInvitationsForUser: Found', data.length, 'pending invitation(s) for email:', userEmail);
       
       // 如果查询成功，直接使用 inviter_email 字段（已存储在邀请记录中）
       // 不再需要查询 users 表，避免 RLS 权限问题
@@ -378,23 +355,14 @@ export async function getPendingInvitationsForUser(): Promise<HouseholdInvitatio
     }
 
     return data.map((row: any) => {
-      // 提取家庭名称（可能是对象或数组，或者直接是字符串）
+      // 提取家庭名称（可能是对象或数组）
       let householdName: string | undefined = undefined;
-      
-      // 如果 households 字段存在，尝试提取名称
       if (row.households) {
         if (Array.isArray(row.households) && row.households.length > 0) {
           householdName = row.households[0].name;
         } else if (typeof row.households === 'object' && row.households.name) {
           householdName = row.households.name;
         }
-      }
-      
-      // 如果还没有获取到家庭名称，尝试通过household_id查询
-      if (!householdName && row.household_id) {
-        // 注意：这里不能直接查询，因为已经在前面查询过了
-        // 但是如果前面的查询失败，这里会缺失名称
-        // 在合并阶段已经处理了，所以这里应该能获取到
       }
 
       // 直接使用 inviter_email 字段（已存储在邀请记录中，不需要查询 users 表）
@@ -594,7 +562,6 @@ export async function getHouseholdInvitations(householdId: string): Promise<Hous
     }
 
     // 检查用户是否是管理员
-    console.log('getHouseholdInvitations: Checking admin status for user:', authUser.id, 'household:', householdId);
     const { data: userHousehold, error: checkError } = await supabase
       .from('user_households')
       .select('is_admin')
@@ -602,24 +569,11 @@ export async function getHouseholdInvitations(householdId: string): Promise<Hous
       .eq('household_id', householdId)
       .single();
 
-    if (checkError) {
-      console.error('getHouseholdInvitations: Error checking admin status:', {
-        code: checkError.code,
-        message: checkError.message,
-        details: checkError.details,
-      });
+    if (checkError || !userHousehold?.is_admin) {
       return [];
     }
-    
-    if (!userHousehold?.is_admin) {
-      console.log('getHouseholdInvitations: User is not admin, returning empty array');
-      return [];
-    }
-    
-    console.log('getHouseholdInvitations: User is admin, proceeding to query invitations');
 
     // 获取所有邀请（包括pending, declined, cancelled, accepted状态）
-    console.log('getHouseholdInvitations: Querying invitations for household:', householdId);
     const { data, error } = await supabase
       .from('household_invitations')
       .select('*')
@@ -628,25 +582,15 @@ export async function getHouseholdInvitations(householdId: string): Promise<Hous
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('getHouseholdInvitations: Query error:', {
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-      });
-      
-      // 如果是权限错误，记录详细信息以便调试
+      // 如果是权限错误，静默处理，不记录错误日志（避免日志噪音）
       if (error.code === '42501' || error.message?.includes('permission denied')) {
-        console.error('getHouseholdInvitations: Permission denied - RLS policy may be blocking access');
-        console.error('getHouseholdInvitations: Current user ID:', authUser.id);
-        console.error('getHouseholdInvitations: Household ID:', householdId);
+        // 权限错误时，静默返回空数组
         return [];
       }
-      // 其他错误也记录
+      // 其他错误才记录
+      console.error('Error getting household invitations:', error);
       return [];
     }
-    
-    console.log('getHouseholdInvitations: Query successful, found', data?.length || 0, 'invitations');
 
     if (!data) return [];
 

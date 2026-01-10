@@ -22,6 +22,7 @@ import { getCurrentUser, getCurrentHousehold } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
 import { createInvitation, getHouseholdInvitations, cancelInvitation, HouseholdInvitation } from '@/lib/household-invitations';
+import { GradientText } from '@/lib/GradientText';
 
 export default function HouseholdMembersScreen() {
   const router = useRouter();
@@ -374,27 +375,16 @@ export default function HouseholdMembersScreen() {
       
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <Ionicons name="arrow-back" size={24} color="#2D3436" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Household Members</Text>
-        <View style={styles.headerRight} />
+        <View style={styles.headerTitleContainer}>
+          <GradientText
+            text="Track by member, analyze as a family."
+            style={styles.headerTitle}
+            containerStyle={styles.gradientTextContainer}
+          />
+        </View>
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        {isCurrentUserAdmin && (
-          <TouchableOpacity
-            style={styles.inviteButton}
-            onPress={handleInvite}
-          >
-            <Ionicons name="person-add-outline" size={20} color="#6C5CE7" />
-            <Text style={styles.inviteButtonText}>Invite Member</Text>
-          </TouchableOpacity>
-        )}
-        
         {/* 成员组：自己和已加入成员 */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Members</Text>
@@ -463,13 +453,19 @@ export default function HouseholdMembersScreen() {
         {isCurrentUserAdmin && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Invitations</Text>
-            {(pendingInvitations.length === 0 && declinedInvitations.length === 0 && cancelledInvitations.length === 0 && removedInvitations.length === 0) ? (
-              <View style={styles.emptyState}>
-                <Ionicons name="mail-outline" size={32} color="#95A5A6" />
-                <Text style={styles.emptyStateSubtext}>No invitations yet</Text>
-              </View>
-            ) : (
-              <View style={styles.compactList}>
+            <View style={styles.compactList}>
+              {/* 邀请成员按钮 - 放在列表首位 */}
+              <TouchableOpacity
+                style={[styles.compactItem, (pendingInvitations.length === 0 && declinedInvitations.length === 0 && cancelledInvitations.length === 0 && removedInvitations.length === 0) && styles.compactItemLast]}
+                onPress={handleInvite}
+              >
+                <View style={styles.compactItemContent}>
+                  <View style={[styles.compactNameEmail, { flexDirection: 'row', alignItems: 'center' }]}>
+                    <Ionicons name="person-add-outline" size={20} color="#6C5CE7" style={{ marginRight: 8 }} />
+                    <Text style={[styles.compactName, { color: '#6C5CE7', marginBottom: 0 }]}>Invite Member</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
               {/* 待同意邀请 */}
               {pendingInvitations.map((invitation, index) => {
                 const totalPending = pendingInvitations.length;
@@ -578,7 +574,6 @@ export default function HouseholdMembersScreen() {
                 );
               })}
             </View>
-            )}
           </View>
         )}
       </ScrollView>
@@ -676,7 +671,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     paddingHorizontal: 20,
     paddingTop: 60,
     paddingBottom: 16,
@@ -684,19 +679,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E9ECEF',
   },
-  backButton: {
-    width: 40,
-    height: 40,
+  headerTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'flex-start',
+    paddingHorizontal: 8,
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#2D3436',
+    textAlign: 'center',
   },
-  headerRight: {
-    width: 40,
+  gradientTextContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   scrollView: {
     flex: 1,
