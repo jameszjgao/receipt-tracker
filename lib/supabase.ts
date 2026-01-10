@@ -1,29 +1,43 @@
 import { createClient } from '@supabase/supabase-js';
 import Constants from 'expo-constants';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
 
-const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+// 安全获取环境变量，避免启动时崩溃
+const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
+// 验证环境变量是否配置
+export function validateSupabaseConfig(): { valid: boolean; error?: string } {
+  if (!supabaseUrl || supabaseUrl === '' || supabaseUrl.includes('placeholder')) {
+    return { valid: false, error: 'Supabase URL is not configured. Please set EXPO_PUBLIC_SUPABASE_URL.' };
+  }
+  if (!supabaseAnonKey || supabaseAnonKey === '' || supabaseAnonKey === 'placeholder-key') {
+    return { valid: false, error: 'Supabase Anon Key is not configured. Please set EXPO_PUBLIC_SUPABASE_ANON_KEY.' };
+  }
+  return { valid: true };
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
-  db: {
-    schema: 'public',
-  },
-  global: {
-    headers: {
-      'x-client-info': 'receipt-tracker@1.0.0',
+// 使用安全默认值初始化客户端，避免启动时崩溃
+// 实际使用时会在首次调用前验证配置
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-key',
+  {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: false,
     },
-  },
-});
+    db: {
+      schema: 'public',
+    },
+    global: {
+      headers: {
+        'x-client-info': 'receipt-tracker@1.0.0',
+      },
+    },
+  }
+);
 
 // Storage Bucket 名称配置
 const STORAGE_BUCKET = 'receipts';

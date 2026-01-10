@@ -19,7 +19,18 @@ export default {
     android: {
       package: 'com.snapreceipt.app',
       versionCode: 1,
-      permissions: ['CAMERA'],
+      permissions: [
+        'CAMERA',
+        'READ_EXTERNAL_STORAGE',
+        'WRITE_EXTERNAL_STORAGE',
+        'READ_MEDIA_IMAGES',
+        'ACCESS_NETWORK_STATE',
+        'INTERNET',
+      ],
+      adaptiveIcon: {
+        foregroundImage: './assets/icon.png',
+        backgroundColor: '#ffffff',
+      },
       intentFilters: [
         {
           action: 'VIEW',
@@ -61,9 +72,9 @@ export default {
       eas: {
         projectId: "b9f86f38-62c6-4bf1-849b-aadccf272d7d"
       },
-      supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
-      supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
-      geminiApiKey: process.env.GEMINI_API_KEY,
+      supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL || '',
+      supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
+      geminiApiKey: process.env.GEMINI_API_KEY || '',
     },
   },
 };

@@ -1,6 +1,17 @@
 import { Stack } from 'expo-router';
+import { useEffect } from 'react';
+import { validateSupabaseConfig } from '@/lib/supabase';
 
 export default function RootLayout() {
+  useEffect(() => {
+    // 在应用启动时验证Supabase配置（仅用于日志，不阻止启动）
+    const config = validateSupabaseConfig();
+    if (!config.valid) {
+      console.warn('⚠️ Supabase配置警告:', config.error);
+      console.warn('应用可能无法正常连接Supabase。请在构建时设置正确的环境变量。');
+    }
+  }, []);
+
   return (
     <Stack>
         <Stack.Screen 
