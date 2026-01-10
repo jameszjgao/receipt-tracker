@@ -187,7 +187,7 @@ export default function ReceiptDetailsScreen() {
   // 直接更新商品项并保存（不进入编辑模式）
   const handleItemChangeDirect = async (
     index: number,
-    field: 'categoryId' | 'purpose' | 'isAsset',
+    field: 'categoryId' | 'purposeId' | 'isAsset',
     value: any
   ) => {
     if (!id || !currentReceipt) return;
@@ -209,8 +209,8 @@ export default function ReceiptDetailsScreen() {
           updatedItem.categoryId = value;
           updatedItem.category = selectedCategory;
         }
-      } else if (field === 'purpose') {
-        updatedItem.purpose = value as ItemPurpose;
+      } else if (field === 'purposeId') {
+        updatedItem.purposeId = value as string | null;
       } else if (field === 'isAsset') {
         updatedItem.isAsset = value;
       }
@@ -632,7 +632,7 @@ export default function ReceiptDetailsScreen() {
                         style={[
                           styles.tag,
                           { 
-                            backgroundColor: purposes.find(p => p.name === item.purpose)?.color || '#95A5A6' 
+                            backgroundColor: item.purpose?.color || purposes.find(p => p.id === item.purposeId)?.color || '#95A5A6' 
                           },
                         ]}
                       >
@@ -641,7 +641,7 @@ export default function ReceiptDetailsScreen() {
                           numberOfLines={1}
                           ellipsizeMode="tail"
                         >
-                          {purposes.find(p => p.name === item.purpose)?.name || item.purpose}
+                          {item.purpose?.name || purposes.find(p => p.id === item.purposeId)?.name || 'Unknown'}
                         </Text>
                         <Ionicons name="chevron-down" size={12} color="#fff" style={styles.tagIcon} />
                       </View>
@@ -860,7 +860,7 @@ export default function ReceiptDetailsScreen() {
                 const itemIndex = showPurposePicker;
                 if (itemIndex === null) return null;
                 const item = currentReceipt.items[itemIndex];
-                const isSelected = item.purpose === purpose.name;
+                const isSelected = item.purposeId === purpose.id;
                 return (
                   <TouchableOpacity
                     key={purpose.id}
@@ -870,7 +870,7 @@ export default function ReceiptDetailsScreen() {
                     ]}
                     onPress={async () => {
                       setShowPurposePicker(null);
-                      await handleItemChangeDirect(itemIndex, 'purpose', purpose.name as ItemPurpose);
+                      await handleItemChangeDirect(itemIndex, 'purposeId', purpose.id);
                     }}
                   >
                     <View

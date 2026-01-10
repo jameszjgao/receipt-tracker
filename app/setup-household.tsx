@@ -21,7 +21,7 @@ import { initializeAuthCache } from '@/lib/auth-cache';
 
 export default function SetupHouseholdScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ inviteToken?: string }>();
+  const params = useLocalSearchParams<{ inviteId?: string }>();
   const [loading, setLoading] = useState(true);
   const [pendingInvitations, setPendingInvitations] = useState<HouseholdInvitation[]>([]);
   const [selectedInvitation, setSelectedInvitation] = useState<HouseholdInvitation | null>(null);
@@ -37,14 +37,14 @@ export default function SetupHouseholdScreen() {
   }, []);
 
   useEffect(() => {
-    if (params.inviteToken && pendingInvitations.length > 0) {
-      const invitation = pendingInvitations.find(inv => inv.token === params.inviteToken);
+    if (params.inviteId && pendingInvitations.length > 0) {
+      const invitation = pendingInvitations.find(inv => inv.id === params.inviteId);
       if (invitation) {
         setSelectedInvitation(invitation);
         setMode('invite');
       }
     }
-  }, [params.inviteToken, pendingInvitations]);
+  }, [params.inviteId, pendingInvitations]);
 
   const loadInvitations = async () => {
     try {

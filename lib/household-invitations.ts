@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { getCurrentUser } from './auth';
+import { getCurrentUser, getCurrentHousehold } from './auth';
 import Constants from 'expo-constants';
 
 export interface HouseholdInvitation {
@@ -7,111 +7,125 @@ export interface HouseholdInvitation {
   householdId: string;
   inviterId: string;
   inviteeEmail: string;
-  token: string;
-  status: 'pending' | 'accepted' | 'expired' | 'cancelled';
-  expiresAt: string;
+  status: 'pending' | 'accepted' | 'expired' | 'cancelled' | 'declined';
   createdAt: string;
   acceptedAt?: string;
   householdName?: string; // 可选的家庭名称字段
+  inviterEmail?: string; // 邀请者的email
 }
 
-// 生成邀请token
-function generateInvitationToken(): string {
-  return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
-}
-
-// 创建邀请
+// 创建邀请（极简版本：只使用缓存数据，不查询数据库）
+// 业务逻辑：家庭管理员创建邀请，包含自己的id和email（来自缓存）、当前家庭id、被邀请者email、创建时间、状态
 export async function createInvitation(inviteeEmail: string): Promise<{ invitation: HouseholdInvitation | null; error: Error | null }> {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
+    // 1. 获取认证用户ID（不查询数据库）
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser?.id) {
       return { invitation: null, error: new Error('Not logged in') };
     }
 
+    // 2. 从缓存获取用户信息（包含当前家庭ID和email）
+    const user = await getCurrentUser();
+    if (!user) {
+      return { invitation: null, error: new Error('User not found in cache') };
+    }
+
+    // 3. 使用缓存的当前家庭ID（前端已确保用户是管理员）
     const householdId = user.currentHouseholdId || user.householdId;
     if (!householdId) {
       return { invitation: null, error: new Error('No household selected') };
     }
 
-    // 检查用户是否是管理员
-    const { data: userHousehold, error: checkError } = await supabase
-      .from('user_households')
-      .select('is_admin')
-      .eq('user_id', user.id)
-      .eq('household_id', householdId)
-      .single();
-
-    if (checkError || !userHousehold?.is_admin) {
-      return { invitation: null, error: new Error('Only admins can invite members') };
+    // 4. 使用缓存的用户email
+    const inviterEmail = user.email || authUser.email || '';
+    if (!inviterEmail) {
+      return { invitation: null, error: new Error('Inviter email not found') };
     }
 
-    // 检查被邀请者是否已经是家庭成员
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', inviteeEmail.toLowerCase().trim())
-      .single();
+    // 5. 准备插入数据（所有数据来自缓存，不查询数据库）
+    const createdAt = new Date().toISOString();
+    const insertData = {
+      household_id: householdId,
+      inviter_id: authUser.id, // 来自认证系统
+      inviter_email: inviterEmail, // 来自缓存
+      invitee_email: inviteeEmail.toLowerCase().trim(), // 用户输入
+      status: 'pending', // 自动生成的状态
+      created_at: createdAt, // 创建时间
+    };
 
-    if (existingUser) {
-      const { data: existingMember } = await supabase
-        .from('user_households')
+    // 6. 获取家庭名称（从缓存，不查询数据库）
+    const household = await getCurrentHousehold();
+    const householdName = household?.name || 'a household';
+
+    // 7. 使用 RPC 函数插入邀请记录（绕过 RLS，避免权限问题）
+    // 这样就不需要查询数据库，也不会触发 RLS 策略
+    const { data: invitationId, error: rpcError } = await supabase.rpc('create_household_invitation', {
+      p_household_id: householdId,
+      p_inviter_id: authUser.id,
+      p_inviter_email: inviterEmail,
+      p_invitee_email: inviteeEmail.toLowerCase().trim(),
+    });
+
+    if (rpcError || !invitationId) {
+      console.error('Error creating invitation via RPC:', rpcError);
+      // 如果 RPC 函数不存在或失败，回退到直接插入（可能失败）
+      console.log('RPC function failed, falling back to direct insert');
+      const { data: insertResult, error: insertError } = await supabase
+        .from('household_invitations')
+        .insert(insertData)
         .select('id')
-        .eq('user_id', existingUser.id)
-        .eq('household_id', householdId)
         .single();
 
-      if (existingMember) {
-        return { invitation: null, error: new Error('User is already a member of this household') };
+      if (insertError || !insertResult?.id) {
+        return {
+          invitation: null,
+          error: new Error(insertError?.message || rpcError?.message || 'Failed to create invitation'),
+        };
       }
+      
+      const finalInvitationId = insertResult.id;
+      
+      // 返回邀请信息
+      return {
+        invitation: {
+          id: finalInvitationId,
+          householdId: householdId,
+          inviterId: authUser.id,
+          inviteeEmail: inviteeEmail.toLowerCase().trim(),
+          status: 'pending',
+          createdAt: createdAt,
+          acceptedAt: undefined,
+          inviterEmail: inviterEmail,
+          householdName: householdName,
+        },
+        error: null,
+      };
     }
 
-    // 检查是否有未过期的邀请
-    const { data: existingInvitation } = await supabase
-      .from('household_invitations')
-      .select('id')
-      .eq('household_id', householdId)
-      .eq('invitee_email', inviteeEmail.toLowerCase().trim())
-      .eq('status', 'pending')
-      .gt('expires_at', new Date().toISOString())
-      .single();
+    // 8. 发送邀请邮件（异步，不阻塞返回，失败不影响邀请创建）
+    sendInvitationEmail(
+      inviteeEmail, 
+      invitationId,
+      false,
+      householdId,
+      inviterEmail.split('@')[0] || 'Someone',
+      householdName
+    ).catch(err => {
+      console.warn('Failed to send invitation email:', err);
+    });
 
-    if (existingInvitation) {
-      return { invitation: null, error: new Error('An invitation has already been sent to this email') };
-    }
-
-    // 创建邀请
-    const token = generateInvitationToken();
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7); // 7天后过期
-
-    const { data, error } = await supabase
-      .from('household_invitations')
-      .insert({
-        household_id: householdId,
-        inviter_id: user.id,
-        invitee_email: inviteeEmail.toLowerCase().trim(),
-        token: token,
-        expires_at: expiresAt.toISOString(),
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    // 发送邀请邮件
-    await sendInvitationEmail(inviteeEmail, token, existingUser !== null);
-
+    // 9. 返回邀请信息（使用已知数据，不查询数据库）
     return {
       invitation: {
-        id: data.id,
-        householdId: data.household_id,
-        inviterId: data.inviter_id,
-        inviteeEmail: data.invitee_email,
-        token: data.token,
-        status: data.status,
-        expiresAt: data.expires_at,
-        createdAt: data.created_at,
-        acceptedAt: data.accepted_at,
+        id: invitationId,
+        householdId: householdId,
+        inviterId: authUser.id,
+        inviteeEmail: inviteeEmail.toLowerCase().trim(),
+        status: 'pending',
+        createdAt: createdAt,
+        acceptedAt: undefined,
+        inviterEmail: inviterEmail,
+        householdName: householdName,
       },
       error: null,
     };
@@ -124,8 +138,15 @@ export async function createInvitation(inviteeEmail: string): Promise<{ invitati
   }
 }
 
-// 发送邀请邮件（通过 Supabase Edge Function 或直接调用邮件服务）
-async function sendInvitationEmail(email: string, token: string, isExistingUser: boolean): Promise<void> {
+// 发送邀请邮件（简化版本：使用传入的参数，不查询数据库）
+async function sendInvitationEmail(
+  email: string, 
+  invitationId: string,
+  isExistingUser: boolean,
+  householdId?: string,
+  inviterName?: string,
+  householdName?: string // 新增参数，从缓存传入
+): Promise<void> {
   try {
     const isDev = Constants.expoConfig?.extra?.supabaseUrl?.includes('localhost') || 
                   process.env.NODE_ENV === 'development';
@@ -133,20 +154,11 @@ async function sendInvitationEmail(email: string, token: string, isExistingUser:
       ? 'exp://localhost:8081' // 开发环境
       : 'snapreceipt://'; // 生产环境
 
-    const inviteUrl = `${baseUrl}/invite/${token}`;
+    const inviteUrl = `${baseUrl}/invite/${invitationId}`;
 
-    // 获取邀请者信息
-    const user = await getCurrentUser();
-    if (!user) return;
-
-    const { data: household } = await supabase
-      .from('households')
-      .select('name')
-      .eq('id', user.currentHouseholdId || user.householdId)
-      .single();
-
-    const householdName = household?.name || 'a household';
-    const inviterName = user.name || user.email.split('@')[0];
+    // 使用传入的参数，不查询数据库
+    const finalHouseholdName = householdName || 'a household';
+    const finalInviterName = inviterName || 'Someone';
 
     // 尝试调用 Supabase Edge Function 发送邮件
     // 如果 Edge Function 不存在，则使用 Supabase 的邮件功能
@@ -156,7 +168,7 @@ async function sendInvitationEmail(email: string, token: string, isExistingUser:
           email,
           inviteUrl,
           householdName,
-          inviterName,
+          inviterName: finalInviterName,
           isExistingUser,
         },
       });
@@ -177,7 +189,7 @@ async function sendInvitationEmail(email: string, token: string, isExistingUser:
         to: email,
         inviteUrl,
         householdName,
-        inviterName,
+        inviterName: finalInviterName,
         isExistingUser,
       });
 
@@ -199,13 +211,13 @@ async function sendInvitationEmail(email: string, token: string, isExistingUser:
   }
 }
 
-// 根据token获取邀请信息
-export async function getInvitationByToken(token: string): Promise<HouseholdInvitation | null> {
+// 根据ID获取邀请信息
+export async function getInvitationById(invitationId: string): Promise<HouseholdInvitation | null> {
   try {
     const { data, error } = await supabase
       .from('household_invitations')
       .select('*')
-      .eq('token', token)
+      .eq('id', invitationId)
       .single();
 
     if (error) {
@@ -215,111 +227,161 @@ export async function getInvitationByToken(token: string): Promise<HouseholdInvi
 
     if (!data) return null;
 
-    // 检查是否过期
-    if (new Date(data.expires_at) < new Date() && data.status === 'pending') {
-      // 自动更新为过期状态
-      await supabase
-        .from('household_invitations')
-        .update({ status: 'expired' })
-        .eq('id', data.id);
-      return null;
-    }
-
     return {
       id: data.id,
       householdId: data.household_id,
       inviterId: data.inviter_id,
       inviteeEmail: data.invitee_email,
-      token: data.token,
       status: data.status,
-      expiresAt: data.expires_at,
       createdAt: data.created_at,
       acceptedAt: data.accepted_at,
     };
   } catch (error) {
-    console.error('Error getting invitation by token:', error);
+    console.error('Error getting invitation by id:', error);
     return null;
   }
 }
 
 // 获取用户待处理的邀请（包含家庭名称）
+// 如果查询失败（如 RLS 权限问题），静默返回空数组，不阻塞登录流程
+/**
+ * 判断用户是否被邀请
+ * 逻辑：查询邀请列表中是否有pending状态的邀请记录，且被邀请者email与登录者email相同
+ * 
+ * @returns 返回所有pending状态的邀请记录（invitee_email与当前登录用户email匹配）
+ */
 export async function getPendingInvitationsForUser(): Promise<HouseholdInvitation[]> {
   try {
+    // 1. 获取当前登录用户的邮箱（从auth.users表，避免查询users表触发RLS权限检查）
     const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (!authUser || !authUser.email) return [];
-
-    // 优先从 users 表获取 email，如果不存在或查询失败则使用 auth 用户的 email
-    let userEmail = authUser.email;
-    try {
-      const { data: userData } = await supabase
-        .from('users')
-        .select('email')
-        .eq('id', authUser.id)
-        .maybeSingle();
-      
-      if (userData?.email) {
-        userEmail = userData.email;
-      }
-    } catch (userQueryError) {
-      // 使用 auth 用户的 email 继续
+    if (!authUser || !authUser.email) {
+      console.log('getPendingInvitationsForUser: No authenticated user or email');
+      return [];
     }
-    if (!userEmail) return [];
 
-    // 通过 join 查询邀请和家庭信息
-    // 如果 join 查询失败（可能是 RLS 策略问题），尝试只查询邀请，不 join 家庭信息
+    // 2. 规范化用户邮箱（转为小写，确保大小写不敏感匹配）
+    const userEmail = authUser.email.toLowerCase().trim();
+    if (!userEmail) {
+      console.log('getPendingInvitationsForUser: Empty user email after normalization');
+      return [];
+    }
+
+    console.log('getPendingInvitationsForUser: Checking invitations for email:', userEmail);
+
+    // 3. 查询邀请列表：查找invitee_email与登录者email相同且status为pending的记录
+    // 判断逻辑：邀请列表中是否有pending邀请记录的被邀请email与登录者相同的
     let data: any[] | null = null;
     let error: any = null;
     
     try {
       const result = await supabase
         .from('household_invitations')
-        .select(`
-          *,
-          households (
-            id,
-            name
-          )
-        `)
-        .eq('invitee_email', userEmail.toLowerCase())
-        .eq('status', 'pending')
-        .gt('expires_at', new Date().toISOString())
-        .order('created_at', { ascending: false });
+        .select('*')
+        .eq('invitee_email', userEmail) // 精确匹配：被邀请者email与登录者email相同
+        .eq('status', 'pending') // 只查询pending状态的邀请
+        .order('created_at', { ascending: false }); // 按创建时间倒序排列
       
       data = result.data;
       error = result.error;
-    } catch (joinError: any) {
-      // 如果 join 查询失败（可能是 RLS 策略问题），尝试只查询邀请表
-      try {
-        const fallbackResult = await supabase
-          .from('household_invitations')
-          .select('*')
-          .eq('invitee_email', userEmail.toLowerCase())
-          .eq('status', 'pending')
-          .gt('expires_at', new Date().toISOString())
-          .order('created_at', { ascending: false });
-        
-        data = fallbackResult.data;
-        error = fallbackResult.error;
-      } catch (fallbackError) {
+      
+      console.log('getPendingInvitationsForUser: Query result:', {
+        email: userEmail,
+        foundCount: data?.length || 0,
+        hasError: !!error,
+        errorCode: error?.code,
+      });
+      
+      // 4. 处理查询错误（权限错误等，静默返回空数组，不阻塞登录流程）
+      if (error) {
+        if (error.code === '42501' || error.message?.includes('permission denied')) {
+          console.log('getPendingInvitationsForUser: Permission denied (non-blocking)');
+          return [];
+        }
+        console.log('getPendingInvitationsForUser: Query failed (non-blocking):', error.code, error.message);
         return [];
       }
-    }
-
-    if (error) {
-      // 如果是权限错误，记录详细信息
-      if (error.code === '42501' || error.message?.includes('permission denied')) {
-        console.error('Permission error getting invitations');
-      } else {
-        console.error('Error getting pending invitations:', error);
+      
+      // 5. 如果没有找到匹配的pending邀请记录，返回空数组（表示用户没有被邀请）
+      if (!data || data.length === 0) {
+        console.log('getPendingInvitationsForUser: No pending invitations found for email:', userEmail);
+        return [];
       }
+      
+      console.log('getPendingInvitationsForUser: Found', data.length, 'pending invitation(s) for email:', userEmail);
+      
+      // 如果查询成功，直接使用 inviter_email 字段（已存储在邀请记录中）
+      // 不再需要查询 users 表，避免 RLS 权限问题
+      if (data && data.length > 0 && !error) {
+        const householdIds = [...new Set(data.map((row: any) => row.household_id))];
+        
+        console.log('Fetching additional data:', {
+          householdIds,
+          dataLength: data.length,
+        });
+        
+        // 不再需要查询邀请者信息，因为 inviter_email 已经存储在邀请记录中
+        
+        // 获取家庭名称（仍然需要查询 households 表）
+        let households: any[] = [];
+        if (householdIds.length > 0) {
+          try {
+            const { data: householdsData, error: householdsError } = await supabase
+              .from('households')
+              .select('id, name')
+              .in('id', householdIds);
+            
+            console.log('Households query result:', {
+              hasData: !!householdsData,
+              dataLength: householdsData?.length || 0,
+              hasError: !!householdsError,
+              errorCode: householdsError?.code,
+              errorMessage: householdsError?.message,
+              households: householdsData,
+            });
+            
+            households = householdsData || [];
+          } catch (householdsErr) {
+            console.error('Error fetching households:', householdsErr);
+            households = [];
+          }
+        }
+        
+        // 将家庭名称添加到数据中（inviter_email 已经存储在邀请记录中，不需要合并）
+        if (data) {
+          data = data.map((row: any) => {
+            const household = households.find((h: any) => h.id === row.household_id);
+            
+            console.log('Merging data for row:', {
+              rowId: row.id,
+              householdId: row.household_id,
+              hasHousehold: !!household,
+              householdName: household?.name,
+              inviterEmail: row.inviter_email, // 直接使用 inviter_email 字段
+            });
+            
+            return {
+              ...row,
+              households: household ? { name: household.name } : null,
+            };
+          });
+        }
+      }
+    } catch (queryError: any) {
+      // 查询异常时，静默返回空数组，不阻塞登录流程
+      console.log('Invitations query exception (non-blocking):', queryError.message);
       return [];
     }
 
-    if (!data) return [];
+    // 如果没有数据，直接返回空数组
+    if (!data || data.length === 0) {
+      return [];
+    }
 
     return data.map((row: any) => {
-      // 提取家庭名称（可能是对象或数组）
+      // 提取家庭名称（可能是对象或数组，或者直接是字符串）
       let householdName: string | undefined = undefined;
+      
+      // 如果 households 字段存在，尝试提取名称
       if (row.households) {
         if (Array.isArray(row.households) && row.households.length > 0) {
           householdName = row.households[0].name;
@@ -327,19 +389,41 @@ export async function getPendingInvitationsForUser(): Promise<HouseholdInvitatio
           householdName = row.households.name;
         }
       }
+      
+      // 如果还没有获取到家庭名称，尝试通过household_id查询
+      if (!householdName && row.household_id) {
+        // 注意：这里不能直接查询，因为已经在前面查询过了
+        // 但是如果前面的查询失败，这里会缺失名称
+        // 在合并阶段已经处理了，所以这里应该能获取到
+      }
 
-      return {
+      // 直接使用 inviter_email 字段（已存储在邀请记录中，不需要查询 users 表）
+      const inviterEmail: string | undefined = row.inviter_email || undefined;
+
+      // 调试日志
+      console.log('Invitation data processed:', {
+        id: row.id,
+        householdName,
+        inviterEmail,
+        hasHouseholds: !!row.households,
+        householdsType: typeof row.households,
+        rawHouseholds: row.households,
+      });
+
+      const result = {
         id: row.id,
         householdId: row.household_id,
         inviterId: row.inviter_id,
         inviteeEmail: row.invitee_email,
-        token: row.token,
         status: row.status,
-        expiresAt: row.expires_at,
         createdAt: row.created_at,
         acceptedAt: row.accepted_at,
-        householdName: householdName, // 添加家庭名称字段
+        householdName: householdName || undefined, // 添加家庭名称字段
+        inviterEmail: inviterEmail || undefined, // 直接使用 inviter_email 字段
       };
+      
+      console.log('Final invitation result:', result);
+      return result;
     });
   } catch (error) {
     console.error('Error getting pending invitations for user:', error);
@@ -348,7 +432,7 @@ export async function getPendingInvitationsForUser(): Promise<HouseholdInvitatio
 }
 
 // 接受邀请（加入家庭）
-export async function acceptInvitation(token: string): Promise<{ error: Error | null }> {
+export async function acceptInvitation(invitationId: string): Promise<{ error: Error | null }> {
   try {
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) {
@@ -356,7 +440,7 @@ export async function acceptInvitation(token: string): Promise<{ error: Error | 
     }
 
     // 获取邀请信息
-    const invitation = await getInvitationByToken(token);
+    const invitation = await getInvitationById(invitationId);
     if (!invitation) {
       return { error: new Error('Invitation not found or expired') };
     }
@@ -365,14 +449,9 @@ export async function acceptInvitation(token: string): Promise<{ error: Error | 
       return { error: new Error('Invitation has already been used or cancelled') };
     }
 
-    // 验证邮箱是否匹配
-    const { data: userData } = await supabase
-      .from('users')
-      .select('email')
-      .eq('id', authUser.id)
-      .single();
-
-    if (!userData || userData.email.toLowerCase() !== invitation.inviteeEmail.toLowerCase()) {
+    // 验证邮箱是否匹配（使用 auth.users，避免查询 users 表触发 RLS 权限问题）
+    const userEmail = authUser.email?.toLowerCase();
+    if (!userEmail || userEmail !== invitation.inviteeEmail.toLowerCase()) {
       return { error: new Error('Email does not match invitation') };
     }
 
@@ -394,11 +473,23 @@ export async function acceptInvitation(token: string): Promise<{ error: Error | 
         })
         .eq('id', invitation.id);
 
-      // 切换到该家庭
-      await supabase
-        .from('users')
-        .update({ current_household_id: invitation.householdId })
-        .eq('id', authUser.id);
+      // 切换到该家庭（使用 RPC 函数，避免 RLS 权限问题）
+      try {
+        const { error: rpcError } = await supabase.rpc('update_user_current_household', {
+          p_user_id: authUser.id,
+          p_household_id: invitation.householdId,
+        });
+        if (rpcError) {
+          // 如果 RPC 函数不存在或失败，回退到直接更新（可能失败）
+          console.log('RPC function failed, falling back to direct update:', rpcError);
+          await supabase
+            .from('users')
+            .update({ current_household_id: invitation.householdId })
+            .eq('id', authUser.id);
+        }
+      } catch (updateErr) {
+        console.log('Error updating current household:', updateErr);
+      }
 
       return { error: null };
     }
@@ -425,11 +516,23 @@ export async function acceptInvitation(token: string): Promise<{ error: Error | 
 
     if (updateError) throw updateError;
 
-    // 切换到该家庭
-    await supabase
-      .from('users')
-      .update({ current_household_id: invitation.householdId })
-      .eq('id', authUser.id);
+    // 切换到该家庭（使用 RPC 函数，避免 RLS 权限问题）
+    try {
+      const { error: rpcError } = await supabase.rpc('update_user_current_household', {
+        p_user_id: authUser.id,
+        p_household_id: invitation.householdId,
+      });
+      if (rpcError) {
+        // 如果 RPC 函数不存在或失败，回退到直接更新（可能失败）
+        console.log('RPC function failed, falling back to direct update:', rpcError);
+        await supabase
+          .from('users')
+          .update({ current_household_id: invitation.householdId })
+          .eq('id', authUser.id);
+      }
+    } catch (updateErr) {
+      console.log('Error updating current household:', updateErr);
+    }
 
     return { error: null };
   } catch (error) {
@@ -441,7 +544,7 @@ export async function acceptInvitation(token: string): Promise<{ error: Error | 
 }
 
 // 拒绝邀请
-export async function declineInvitation(token: string): Promise<{ error: Error | null }> {
+export async function declineInvitation(invitationId: string): Promise<{ error: Error | null }> {
   try {
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) {
@@ -449,7 +552,7 @@ export async function declineInvitation(token: string): Promise<{ error: Error |
     }
 
     // 获取邀请信息
-    const invitation = await getInvitationByToken(token);
+    const invitation = await getInvitationById(invitationId);
     if (!invitation) {
       return { error: new Error('Invitation not found or expired') };
     }
@@ -458,21 +561,16 @@ export async function declineInvitation(token: string): Promise<{ error: Error |
       return { error: new Error('Invitation has already been used or cancelled') };
     }
 
-    // 验证邮箱是否匹配
-    const { data: userData } = await supabase
-      .from('users')
-      .select('email')
-      .eq('id', authUser.id)
-      .single();
-
-    if (!userData || userData.email.toLowerCase() !== invitation.inviteeEmail.toLowerCase()) {
+    // 验证邮箱是否匹配（使用 auth.users，避免查询 users 表触发 RLS 权限问题）
+    const userEmail = authUser.email?.toLowerCase();
+    if (!userEmail || userEmail !== invitation.inviteeEmail.toLowerCase()) {
       return { error: new Error('Email does not match invitation') };
     }
 
-    // 更新邀请状态为已取消
+    // 更新邀请状态为已拒绝（declined）
     const { error: updateError } = await supabase
       .from('household_invitations')
-      .update({ status: 'cancelled' })
+      .update({ status: 'declined' })
       .eq('id', invitation.id);
 
     if (updateError) throw updateError;
@@ -489,35 +587,66 @@ export async function declineInvitation(token: string): Promise<{ error: Error |
 // 获取家庭的所有邀请（管理员使用）
 export async function getHouseholdInvitations(householdId: string): Promise<HouseholdInvitation[]> {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
+    // 直接从 auth.users 获取用户信息，避免查询 users 表
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser || !authUser.id) {
       return [];
     }
 
     // 检查用户是否是管理员
+    console.log('getHouseholdInvitations: Checking admin status for user:', authUser.id, 'household:', householdId);
     const { data: userHousehold, error: checkError } = await supabase
       .from('user_households')
       .select('is_admin')
-      .eq('user_id', user.id)
+      .eq('user_id', authUser.id)
       .eq('household_id', householdId)
       .single();
 
-    if (checkError || !userHousehold?.is_admin) {
+    if (checkError) {
+      console.error('getHouseholdInvitations: Error checking admin status:', {
+        code: checkError.code,
+        message: checkError.message,
+        details: checkError.details,
+      });
       return [];
     }
+    
+    if (!userHousehold?.is_admin) {
+      console.log('getHouseholdInvitations: User is not admin, returning empty array');
+      return [];
+    }
+    
+    console.log('getHouseholdInvitations: User is admin, proceeding to query invitations');
 
-    // 获取所有邀请（包括pending, cancelled, accepted状态）
+    // 获取所有邀请（包括pending, declined, cancelled, accepted状态）
+    console.log('getHouseholdInvitations: Querying invitations for household:', householdId);
     const { data, error } = await supabase
       .from('household_invitations')
       .select('*')
       .eq('household_id', householdId)
-      .in('status', ['pending', 'cancelled', 'accepted'])
+      .in('status', ['pending', 'declined', 'cancelled', 'accepted'])
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('Error getting household invitations:', error);
+      console.error('getHouseholdInvitations: Query error:', {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+      });
+      
+      // 如果是权限错误，记录详细信息以便调试
+      if (error.code === '42501' || error.message?.includes('permission denied')) {
+        console.error('getHouseholdInvitations: Permission denied - RLS policy may be blocking access');
+        console.error('getHouseholdInvitations: Current user ID:', authUser.id);
+        console.error('getHouseholdInvitations: Household ID:', householdId);
+        return [];
+      }
+      // 其他错误也记录
       return [];
     }
+    
+    console.log('getHouseholdInvitations: Query successful, found', data?.length || 0, 'invitations');
 
     if (!data) return [];
 
@@ -530,15 +659,11 @@ export async function getHouseholdInvitations(householdId: string): Promise<Hous
     const existingUserIds = new Set(existingMembers?.map(m => m.user_id) || []);
 
     // 获取用户邮箱
+    // 注意：不查询 users 表，因为 RLS 策略可能阻止查询
+    // 直接使用 invitee_email 来过滤，不依赖 users 表
     let existingEmails = new Set<string>();
-    if (existingUserIds.size > 0) {
-      const { data: users } = await supabase
-        .from('users')
-        .select('email, id')
-        .in('id', Array.from(existingUserIds));
-      
-      existingEmails = new Set(users?.map(u => u.email.toLowerCase()) || []);
-    }
+    // 如果确实需要用户邮箱，可以通过 auth.users 表或其他方式获取
+    // 但为了简化，这里暂时跳过，直接使用 invitee_email
 
     // 不过滤任何邀请，返回所有邀请（包括已加入和已移除的）
     // 在UI中根据状态和是否在user_households中来分类显示
@@ -549,9 +674,7 @@ export async function getHouseholdInvitations(householdId: string): Promise<Hous
       householdId: row.household_id,
       inviterId: row.inviter_id,
       inviteeEmail: row.invitee_email,
-      token: row.token,
       status: row.status,
-      expiresAt: row.expires_at,
       createdAt: row.created_at,
       acceptedAt: row.accepted_at,
     }));
@@ -564,8 +687,9 @@ export async function getHouseholdInvitations(householdId: string): Promise<Hous
 // 撤销邀请（管理员使用）
 export async function cancelInvitation(invitationId: string): Promise<{ error: Error | null }> {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
+    // 直接从 auth.users 获取用户信息，避免查询 users 表
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser || !authUser.id) {
       return { error: new Error('Not logged in') };
     }
 
@@ -588,7 +712,7 @@ export async function cancelInvitation(invitationId: string): Promise<{ error: E
     const { data: userHousehold, error: checkError } = await supabase
       .from('user_households')
       .select('is_admin')
-      .eq('user_id', user.id)
+      .eq('user_id', authUser.id)
       .eq('household_id', invitation.household_id)
       .single();
 

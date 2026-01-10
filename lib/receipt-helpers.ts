@@ -1,6 +1,7 @@
 import { GeminiReceiptResult, Receipt, ReceiptStatus } from '@/types';
 import { getCurrentUser } from './auth';
 import { findCategoryByName, getCategories } from './categories';
+import { findPurposeByName, getPurposes } from './purposes';
 import { findOrCreatePaymentAccount } from './payment-accounts';
 
 // 将 Gemini 识别结果转换为 Receipt 格式
@@ -8,8 +9,9 @@ export async function convertGeminiResultToReceipt(result: GeminiReceiptResult):
   const user = await getCurrentUser();
   if (!user) throw new Error('Not logged in');
 
-  // 获取所有分类
+  // 获取所有分类和用途
   const categories = await getCategories();
+  const purposes = await getPurposes();
 
   // 处理支付账户
   let paymentAccountId: string | undefined;
@@ -74,11 +76,21 @@ export async function convertGeminiResultToReceipt(result: GeminiReceiptResult):
         }
       }
 
+      // 匹配用途
+      let purposeId: string | null = null;
+      if (item.purposeName) {
+        const purpose = purposes.find(p => p.name.toLowerCase() === item.purposeName!.toLowerCase())
+          || await findPurposeByName(item.purposeName);
+        if (purpose) {
+          purposeId = purpose.id;
+        }
+      }
+
       return {
         name: item.name,
         categoryId: category.id,
         category: category,
-        purpose: item.purpose || 'Personnel', // 默认值为 Personnel
+        purposeId,
         price: item.price,
         isAsset: item.isAsset || false, // 默认值为 false
         confidence: item.confidence,

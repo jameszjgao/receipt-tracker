@@ -19,7 +19,7 @@ import { initializeAuthCache } from '@/lib/auth-cache';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ inviteToken?: string; email?: string }>();
+  const params = useLocalSearchParams<{ inviteId?: string; email?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -44,23 +44,26 @@ export default function LoginScreen() {
     if (error) {
       Alert.alert('Login Failed', error.message);
     } else {
-      // 登录成功后统一跳转到首页，由 index.tsx 统一处理邀请检查
-      // 数据将在后台异步加载，由目标页面处理
-      router.replace('/');
-
-      // 在后台异步加载用户和家庭信息并初始化缓存（不阻塞跳转）
-      (async () => {
-        try {
-          const user = await getCurrentUser(true); // 强制刷新
-          const household = user ? await getCurrentHousehold(true) : null; // 强制刷新
-          
-          // 初始化缓存
-          await initializeAuthCache(user, household);
-        } catch (error) {
-          console.error('Error initializing auth cache in background:', error);
-          // 错误不影响登录流程，目标页面会处理
+      // 登录成功后，首先检查邀请（处理邀请应在index之前）
+      // 流程：登录成功 -> 判断是否被邀请 -> 有邀请跳转到handle-invitations，无邀请跳转到index
+      try {
+        const { getPendingInvitationsForUser } = await import('@/lib/household-invitations');
+        const invitations = await getPendingInvitationsForUser();
+        
+        if (invitations.length > 0) {
+          // 有邀请，跳转到邀请处理页面（handle-invitations会处理后续流程）
+          console.log('Login: Found pending invitations, redirecting to handle-invitations');
+          router.replace('/handle-invitations');
+          return;
         }
-      })();
+      } catch (invError) {
+        // 邀请检查失败不影响登录流程，静默继续（getPendingInvitationsForUser 已处理错误）
+        console.log('Login: Invitation check failed (non-blocking):', invError);
+      }
+      
+      // 没有邀请，跳转到index（index会检查是否有家庭，无家庭跳转到setup-household，有家庭进入应用）
+      console.log('Login: No invitations, redirecting to index');
+      router.replace('/');
     }
   };
 

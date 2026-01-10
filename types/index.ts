@@ -1,8 +1,16 @@
 // 小票状态
 export type ReceiptStatus = 'pending' | 'processing' | 'confirmed' | 'needs_retake' | 'duplicate';
 
-// 商品用途
-export type ItemPurpose = 'Personnel' | 'Business';
+// 商品用途（用途主数据表 purposes）
+export interface Purpose {
+  id: string;
+  householdId: string;
+  name: string;
+  color: string;
+  isDefault: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
 
 // 消费分类
 export interface Category {
@@ -31,7 +39,8 @@ export interface ReceiptItem {
   name: string;
   categoryId: string;
   category?: Category; // 关联的分类对象
-  purpose: ItemPurpose;
+  purposeId: string | null; // 引用 purposes 表
+  purpose?: Purpose | null; // 关联的用途对象
   price: number;
   isAsset: boolean;
   confidence?: number; // AI识别置信度
@@ -64,8 +73,8 @@ export interface User {
   id: string;
   email: string;
   name?: string; // 用户自定义名字
-  householdId: string; // 保留向后兼容，但优先使用 currentHouseholdId
-  currentHouseholdId?: string; // 当前活动的家庭ID
+  householdId: string | null; // 保留向后兼容，但优先使用 currentHouseholdId（可能为 null）
+  currentHouseholdId?: string; // 当前活动的家庭ID（可能为 undefined）
   createdAt?: string;
 }
 
@@ -115,7 +124,7 @@ export interface GeminiReceiptResult {
     name: string;
     categoryName: string; // 分类名称，从[食品,外餐, 居家, 交通, 购物, 医疗, 教育]中选择
     price: number;
-    purpose?: ItemPurpose; // 可选，如果AI没有识别则默认为Personnel
+    purposeName?: string; // 用途名称，将映射到 purposes.name
     isAsset?: boolean; // 可选
     confidence?: number; // 可选
   }>;

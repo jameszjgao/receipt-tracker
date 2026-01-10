@@ -18,10 +18,14 @@ export async function getPurposes(): Promise<Purpose[]> {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     const { data, error } = await supabase
       .from('purposes')
       .select('*')
-      .eq('household_id', user.householdId)
+      .eq('household_id', householdId)
       .order('is_default', { ascending: false })
       .order('name', { ascending: true });
 
@@ -48,10 +52,14 @@ export async function createPurpose(name: string, color: string = '#95A5A6'): Pr
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     const { data, error } = await supabase
       .from('purposes')
       .insert({
-        household_id: user.householdId,
+        household_id: householdId,
         name: name.trim(),
         color: color,
         is_default: false,
@@ -86,11 +94,15 @@ export async function updatePurpose(purposeId: string, updates: { name?: string;
     if (updates.name !== undefined) updateData.name = updates.name.trim();
     if (updates.color !== undefined) updateData.color = updates.color;
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     const { error } = await supabase
       .from('purposes')
       .update(updateData)
       .eq('id', purposeId)
-      .eq('household_id', user.householdId);
+      .eq('household_id', householdId);
 
     if (error) throw error;
   } catch (error) {
@@ -105,12 +117,16 @@ export async function deletePurpose(purposeId: string): Promise<void> {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     // 检查是否为默认用途
     const { data: purpose, error: fetchError } = await supabase
       .from('purposes')
       .select('is_default')
       .eq('id', purposeId)
-      .eq('household_id', user.householdId)
+      .eq('household_id', householdId)
       .single();
 
     if (fetchError) throw fetchError;
@@ -122,7 +138,7 @@ export async function deletePurpose(purposeId: string): Promise<void> {
       .from('purposes')
       .delete()
       .eq('id', purposeId)
-      .eq('household_id', user.householdId);
+      .eq('household_id', householdId);
 
     if (error) throw error;
   } catch (error) {
@@ -137,10 +153,14 @@ export async function findPurposeByName(name: string): Promise<Purpose | null> {
     const user = await getCurrentUser();
     if (!user) return null;
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) return null;
+
     const { data, error } = await supabase
       .from('purposes')
       .select('*')
-      .eq('household_id', user.householdId)
+      .eq('household_id', householdId)
       .ilike('name', name.trim())
       .limit(1)
       .single();

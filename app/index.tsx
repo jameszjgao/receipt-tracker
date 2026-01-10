@@ -98,38 +98,43 @@ export default function HomeScreen() {
   };
 
   const continueAuthCheck = async () => {
-    // 优先检查是否有待处理的邀请（在进入应用之前处理）
-    // 如果查询邀请失败（可能是权限错误），则跳过邀请检查，继续正常流程
-    let invitations: any[] = [];
-    try {
-      invitations = await getPendingInvitationsForUser();
-    } catch (invError) {
-      // 权限错误不影响主流程，继续
-    }
+    // 流程：登录成功 -> 判断是否被邀请 -> 无邀请或拒绝邀请 -> 判断是否已关联家庭 -> 有关联家庭 -> 进入上次登录的家庭的index
     
-    if (invitations.length > 0) {
-      // 有邀请，跳转到邀请处理页面
-      router.replace('/handle-invitations');
-      return;
+    // 首先检查是否有待处理的邀请（处理邀请应在index之前）
+    try {
+      const { getPendingInvitationsForUser } = await import('@/lib/household-invitations');
+      const invitations = await getPendingInvitationsForUser();
+      
+      if (invitations.length > 0) {
+        // 有邀请，跳转到邀请处理页面（handle-invitations会处理后续流程）
+        console.log('Index: Found pending invitations, redirecting to handle-invitations');
+        router.replace('/handle-invitations');
+        return;
+      }
+    } catch (invError) {
+      // 邀请检查失败不影响流程，静默继续
+      console.log('Index: Invitation check failed (non-blocking):', invError);
     }
 
-    // 检查用户是否有当前家庭（使用缓存，如果缓存未初始化则从数据库读取）
-    // 如果获取用户失败，跳转到设置家庭页面
+    // 无邀请或拒绝邀请后，检查用户是否有当前家庭（使用缓存，如果缓存未初始化则从数据库读取）
     let user;
     try {
-      user = await getCurrentUser();
+      user = await getCurrentUser(true); // 强制刷新，确保获取最新的currentHouseholdId
     } catch (userError) {
+      console.log('Index: Error getting user, redirecting to setup-household');
       router.replace('/setup-household');
       return;
     }
+    
     if (!user) {
+      console.log('Index: No user, redirecting to setup-household');
       router.replace('/setup-household');
       return;
     }
 
-    // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用
-    // 这样可以快速登录，使用上次登录的家庭，避免不必要的查询
+    // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用（进入上次登录的家庭）
     if (user.currentHouseholdId || user.householdId) {
+      console.log('Index: User has current household, entering app');
       setIsLoggedIn(true);
       return;
     }
@@ -140,23 +145,26 @@ export default function HomeScreen() {
     
     // 新用户：没有家庭，跳转到设置家庭页面（创建家庭）
     if (households.length === 0) {
+      console.log('Index: No households, redirecting to setup-household');
       router.replace('/setup-household');
       return;
     }
 
     // 老用户：有家庭但没有当前家庭
     if (households.length === 1) {
-      // 只有一个家庭，自动设置并进入
+      // 只有一个家庭，自动设置并进入（这就是上次登录的家庭）
+      console.log('Index: Setting single household:', households[0].householdId);
       const { setCurrentHousehold } = await import('@/lib/auth');
       await setCurrentHousehold(households[0].householdId);
       // 更新缓存（使用已设置的家庭ID，避免再次查询）
-      const updatedUser = await getCurrentUser(); // 不强制刷新，使用缓存
-      const updatedHousehold = updatedUser ? await getCurrentHousehold() : null; // 不强制刷新，使用缓存
+      const updatedUser = await getCurrentUser(true); // 强制刷新
+      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null; // 强制刷新
       await initializeAuthCache(updatedUser, updatedHousehold);
       setIsLoggedIn(true);
       return;
     } else {
       // 多个家庭但没有当前家庭，跳转到家庭选择页面
+      console.log('Index: Multiple households, redirecting to household-select');
       router.replace('/household-select');
       return;
     }
@@ -249,6 +257,22 @@ export default function HomeScreen() {
       // 更新本地状态
       if (updatedHousehold) {
         setCurrentHouseholdState(updatedHousehold);
+      }
+      
+      // 切换家庭后检查邀请（需求：只在切换家庭时检查邀请）
+      // 如果检查失败（如权限问题），静默继续，不阻塞切换流程
+      try {
+        const { getPendingInvitationsForUser } = await import('@/lib/household-invitations');
+        const invitations = await getPendingInvitationsForUser();
+        
+        if (invitations.length > 0) {
+          // 有邀请，跳转到邀请处理页面
+          router.replace('/handle-invitations');
+          return;
+        }
+      } catch (invError) {
+        // 邀请检查失败不影响切换流程，静默继续（getPendingInvitationsForUser 已处理错误）
+        // 不记录错误日志，避免日志噪音
       }
       
       // 重新加载家庭信息

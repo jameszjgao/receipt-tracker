@@ -8,10 +8,14 @@ export async function getPaymentAccounts(): Promise<PaymentAccount[]> {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     const { data, error } = await supabase
       .from('payment_accounts')
       .select('*')
-      .eq('household_id', user.householdId)
+      .eq('household_id', householdId)
       .order('is_ai_recognized', { ascending: false })
       .order('name', { ascending: true });
 
@@ -37,10 +41,14 @@ export async function createPaymentAccount(name: string, isAiRecognized: boolean
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     const { data, error } = await supabase
       .from('payment_accounts')
       .insert({
-        household_id: user.householdId,
+        household_id: householdId,
         name: name.trim(),
         is_ai_recognized: isAiRecognized,
       })
@@ -72,11 +80,15 @@ export async function updatePaymentAccount(accountId: string, updates: { name?: 
     const updateData: any = {};
     if (updates.name !== undefined) updateData.name = updates.name.trim();
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     const { error } = await supabase
       .from('payment_accounts')
       .update(updateData)
       .eq('id', accountId)
-      .eq('household_id', user.householdId);
+      .eq('household_id', householdId);
 
     if (error) throw error;
   } catch (error) {
@@ -91,11 +103,15 @@ export async function deletePaymentAccount(accountId: string): Promise<void> {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     const { error } = await supabase
       .from('payment_accounts')
       .delete()
       .eq('id', accountId)
-      .eq('household_id', user.householdId);
+      .eq('household_id', householdId);
 
     if (error) throw error;
   } catch (error) {
@@ -149,11 +165,15 @@ export async function findOrCreatePaymentAccount(name: string, isAiRecognized: b
       throw new Error('Payment account name cannot be empty');
     }
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     // 获取所有支付账户
     const { data: allAccounts, error: fetchError } = await supabase
       .from('payment_accounts')
       .select('*')
-      .eq('household_id', user.householdId);
+      .eq('household_id', householdId);
 
     if (fetchError) throw fetchError;
 
@@ -248,12 +268,16 @@ export async function mergePaymentAccount(
       throw new Error('Cannot merge payment account to itself');
     }
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     // 验证所有支付账户都属于当前家庭
     const allAccountIds = [...sourceAccountIds, targetAccountId];
     const { data: accounts, error: fetchError } = await supabase
       .from('payment_accounts')
       .select('*')
-      .eq('household_id', user.householdId)
+      .eq('household_id', householdId)
       .in('id', allAccountIds);
 
     if (fetchError) throw fetchError;
@@ -276,7 +300,7 @@ export async function mergePaymentAccount(
       .from('receipts')
       .update({ payment_account_id: targetAccountId })
       .eq('payment_account_id', sourceAccountId)
-      .eq('household_id', user.householdId);
+      .eq('household_id', householdId);
 
     if (updateError) throw updateError;
 
@@ -284,7 +308,7 @@ export async function mergePaymentAccount(
       const { error: historyError } = await supabase
         .from('payment_account_merge_history')
         .insert({
-          household_id: user.householdId,
+          household_id: householdId,
           source_account_name: sourceAccount.name,
           target_account_id: targetAccountId,
         });
@@ -299,7 +323,7 @@ export async function mergePaymentAccount(
       .from('payment_accounts')
       .delete()
       .eq('id', sourceAccountId)
-      .eq('household_id', user.householdId);
+      .eq('household_id', householdId);
 
     if (deleteError) throw deleteError;
     }
@@ -315,11 +339,15 @@ async function getMergeHistory(): Promise<Map<string, string>> {
     const user = await getCurrentUser();
     if (!user) return new Map();
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) return new Map();
+
     // 获取合并历史记录
     const { data: historyData, error: historyError } = await supabase
       .from('payment_account_merge_history')
       .select('source_account_name, target_account_id')
-      .eq('household_id', user.householdId);
+      .eq('household_id', householdId);
 
     if (historyError) {
       // 如果表不存在，返回空 Map（兼容性处理）
@@ -340,7 +368,7 @@ async function getMergeHistory(): Promise<Map<string, string>> {
     const { data: validAccounts, error: accountsError } = await supabase
       .from('payment_accounts')
       .select('id')
-      .eq('household_id', user.householdId)
+      .eq('household_id', householdId)
       .in('id', targetAccountIds);
 
     if (accountsError) {

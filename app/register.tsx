@@ -19,7 +19,7 @@ import { signUp } from '@/lib/auth';
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ inviteToken?: string; email?: string }>();
+  const params = useLocalSearchParams<{ inviteId?: string; email?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');

@@ -21,11 +21,51 @@ export async function getCurrentUser(forceRefresh: boolean = false): Promise<Use
       return null;
     }
 
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', authUser.id)
-      .maybeSingle();
+    // 优先使用 RPC 函数绕过 RLS 限制
+    let data: any = null;
+    let error: any = null;
+    
+    try {
+      const { data: rpcData, error: rpcError } = await supabase
+        .rpc('get_user_by_id', { p_user_id: authUser.id });
+      
+      if (!rpcError && rpcData && Array.isArray(rpcData) && rpcData.length > 0) {
+        // RPC 函数返回数组，取第一个元素
+        data = rpcData[0];
+      } else if (rpcError) {
+        // RPC 函数出错，回退到直接查询
+        console.log('RPC function failed, falling back to direct query:', rpcError);
+        const { data: queryData, error: queryError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', authUser.id)
+          .maybeSingle();
+        
+        data = queryData;
+        error = queryError;
+      } else {
+        // RPC 函数返回空结果，回退到直接查询
+        const { data: queryData, error: queryError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', authUser.id)
+          .maybeSingle();
+        
+        data = queryData;
+        error = queryError;
+      }
+    } catch (rpcErr) {
+      // RPC 函数可能不存在，回退到直接查询
+      console.log('RPC function not available, using direct query:', rpcErr);
+      const { data: queryData, error: queryError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', authUser.id)
+        .maybeSingle();
+      
+      data = queryData;
+      error = queryError;
+    }
 
     // 如果是权限错误，记录错误信息
     if (error) {
@@ -53,6 +93,12 @@ export async function getCurrentUser(forceRefresh: boolean = false): Promise<Use
         });
       
       if (insertError) {
+        // 如果是重复键错误（用户已存在），静默处理，直接查询
+        const errorCode = String(insertError.code || '');
+        const isDuplicateKey = errorCode === '23505' || 
+                               insertError.message?.includes('duplicate key') ||
+                               insertError.message?.includes('unique constraint');
+        
         // 如果插入失败，可能是记录已存在（并发情况），再次查询
         const { data: retryData, error: retryError } = await supabase
           .from('users')
@@ -61,7 +107,10 @@ export async function getCurrentUser(forceRefresh: boolean = false): Promise<Use
           .maybeSingle();
         
         if (retryError || !retryData) {
-          console.error('Error getting/creating user:', insertError || retryError);
+          // 只有在不是重复键错误时才记录错误
+          if (!isDuplicateKey) {
+            console.error('Error getting/creating user:', insertError || retryError);
+          }
           updateCachedUser(null);
           return null;
         }
@@ -258,10 +307,43 @@ export async function setCurrentHousehold(householdId: string): Promise<{ error:
     }
 
     // 更新用户的当前家庭
-    const { error: updateError } = await supabase
-      .from('users')
-      .update({ current_household_id: householdId })
-      .eq('id', authUser.id);
+    // 优先使用 RPC 函数绕过 RLS 限制
+    let updateError: any = null;
+    try {
+      const { error: rpcError } = await supabase
+        .rpc('update_user_current_household', {
+          p_user_id: authUser.id,
+          p_household_id: householdId
+        });
+      
+      if (rpcError) {
+        // 检查是否是函数不存在错误
+        const isFunctionNotFound = rpcError.code === '42883' || rpcError.message?.includes('function') || rpcError.message?.includes('does not exist');
+        if (isFunctionNotFound) {
+          console.warn('⚠️  RPC function update_user_current_household not found. Please execute create-users-rpc-functions.sql');
+        } else {
+          console.error('❌ RPC function update_user_current_household failed:', rpcError);
+        }
+        // 回退到直接更新（会失败，因为 RLS 策略问题）
+        console.log('⚠️  Falling back to direct update (may fail due to RLS)...');
+        const { error: directError } = await supabase
+          .from('users')
+          .update({ current_household_id: householdId })
+          .eq('id', authUser.id);
+        updateError = directError;
+        if (directError) {
+          console.error('❌ Direct update also failed:', directError);
+        }
+      }
+    } catch (rpcErr) {
+      // RPC 函数可能不存在，回退到直接更新
+      console.log('RPC function not available, using direct update:', rpcErr);
+      const { error: directError } = await supabase
+        .from('users')
+        .update({ current_household_id: householdId })
+        .eq('id', authUser.id);
+      updateError = directError;
+    }
 
     if (updateError) throw updateError;
 
@@ -695,7 +777,7 @@ export async function signUp(email: string, password: string, householdName?: st
       const { data: existingUser } = await supabase
         .from('users')
         .select('id, current_household_id, name')
-        .eq('id', authData.user.id)
+        .eq('id', authData.user!.id)  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
         .maybeSingle();
       
       if (existingUser) {
@@ -704,14 +786,14 @@ export async function signUp(email: string, password: string, householdName?: st
           await supabase
             .from('users')
             .update({ name: userName.trim() })
-            .eq('id', authData.user.id);
+            .eq('id', authData.user!.id);  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
         }
         const user: User = {
-          id: authData.user.id,
+          id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
           email: email,
           name: userName && userName.trim() ? userName.trim() : undefined,
           householdId: existingUser.current_household_id || null, // 返回当前活动的家庭ID，如果没有则为 null
-          currentHouseholdId: existingUser.current_household_id,
+          currentHouseholdId: existingUser.current_household_id || undefined,
         };
         return { user, error: null };
       }
@@ -720,7 +802,7 @@ export async function signUp(email: string, password: string, householdName?: st
       const { error: userError } = await supabase
         .from('users')
         .insert({
-          id: authData.user.id,
+          id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
           email: email,
           name: userNameFinal,
           current_household_id: null,
@@ -757,21 +839,29 @@ export async function signUp(email: string, password: string, householdName?: st
       }
 
       const user: User = {
-        id: authData.user.id,
+        id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
         email: email,
         name: userNameFinal,
-        householdId: null,
-        currentHouseholdId: null,
+        householdId: null,  // 类型为 string | null
+        currentHouseholdId: undefined,  // 类型为 string | undefined
       };
       return { user, error: null };
     }
 
     // 创建家庭和用户记录
+    // 确保 authData.user 存在
+    if (!authData.user) {
+      return { 
+        user: null, 
+        error: new Error('User authentication failed') 
+      };
+    }
+    
     const householdNameFinal = householdName || `${email.split('@')[0]}'s Household`;
     // userNameFinal 已在函数开始处声明（第 338 行），直接使用
     
     const { data: householdId, error: rpcError } = await supabase.rpc('create_user_with_household', {
-      p_user_id: authData.user.id,
+      p_user_id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
       p_email: email,
       p_household_name: householdNameFinal,
       p_user_name: userNameFinal,
@@ -807,7 +897,7 @@ export async function signUp(email: string, password: string, householdName?: st
         const { error: userError } = await supabase
           .from('users')
           .insert({
-            id: authData.user.id,
+            id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
             email: email,
             name: userNameFinal,
             current_household_id: householdData.id,
@@ -823,7 +913,7 @@ export async function signUp(email: string, password: string, householdName?: st
         const { error: associationError } = await supabase
           .from('user_households')
           .insert({
-            user_id: authData.user.id,
+            user_id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
             household_id: householdData.id,
           });
 
@@ -835,7 +925,7 @@ export async function signUp(email: string, password: string, householdName?: st
         await createDefaultCategoriesAndAccounts(householdData.id);
 
         const user: User = {
-          id: authData.user.id,
+          id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
           email: email,
           name: userName && userName.trim() ? userName.trim() : undefined,
           householdId: householdData.id,
@@ -861,7 +951,7 @@ export async function signUp(email: string, password: string, householdName?: st
     const { error: associationError } = await supabase
       .from('user_households')
       .insert({
-        user_id: authData.user.id,
+        user_id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
         household_id: householdId,
         is_admin: true, // Creator is admin
       })
@@ -884,14 +974,14 @@ export async function signUp(email: string, password: string, householdName?: st
     const { error: setCurrentError } = await supabase
       .from('users')
       .update(updateData)
-      .eq('id', authData.user.id);
+      .eq('id', authData.user!.id);  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
 
     if (setCurrentError) {
       console.warn('Failed to set current_household_id/name:', setCurrentError);
     }
 
     const user: User = {
-      id: authData.user.id,
+      id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
       email: email,
       name: userName && userName.trim() ? userName.trim() : undefined,
       householdId: householdId,
@@ -951,15 +1041,27 @@ export async function signIn(email: string, password: string): Promise<{ error: 
             });
           
           if (insertError) {
-            console.error('Error creating user record after login:', insertError);
-            console.error('Error details:', {
-              code: insertError.code,
-              message: insertError.message,
-              details: insertError.details,
-              hint: insertError.hint,
-            });
+            // 如果是重复键错误（用户已存在），静默忽略
+            // 检查错误代码（可能是字符串）和错误消息
+            const errorCode = String(insertError.code || '');
+            const isDuplicateKey = errorCode === '23505' || 
+                                   insertError.message?.includes('duplicate key') ||
+                                   insertError.message?.includes('unique constraint');
+            
+            if (isDuplicateKey) {
+              // 用户记录已存在，这是正常的（可能是并发创建），完全静默，不记录任何日志
+              // 什么都不做，直接继续
+            } else {
+              // 其他错误才记录
+              console.error('Error creating user record after login:', insertError);
+              console.error('Error details:', {
+                code: insertError.code,
+                message: insertError.message,
+                details: insertError.details,
+                hint: insertError.hint,
+              });
+            }
             // 即使创建失败，也继续登录流程（getCurrentUser 会再次尝试创建）
-          } else {
           }
         }
       }

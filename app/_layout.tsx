@@ -111,7 +111,7 @@ export default function RootLayout() {
           }} 
         />
         <Stack.Screen 
-          name="invite/[token]" 
+          name="invite/[id]" 
           options={{ 
             headerShown: false
           }} 

@@ -4,7 +4,7 @@ import { getPurposes } from './purposes';
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as FileSystemNew from 'expo-file-system';
-import { GeminiReceiptResult, ItemPurpose } from '@/types';
+import { GeminiReceiptResult } from '@/types';
 import { getAvailableImageModel } from './gemini-helper';
 import { getMostFrequentCurrency } from './database';
 
@@ -271,7 +271,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
           name: item.name || 'Unknown Item',
           categoryName: item.categoryName || defaultCategory, // Use first category as default
           price: Number(item.price) || 0,
-          purpose: (item.purpose as ItemPurpose) || 'Home',
+          purposeName: item.purpose || 'Home',
           isAsset: item.isAsset !== undefined ? Boolean(item.isAsset) : false,
           confidence: item.confidence !== undefined ? Number(item.confidence) : 0.8,
         })),
@@ -894,6 +894,10 @@ Please return strictly in JSON format without any extra text. JSON format as fol
           parsedResult.items = parsedResult.items.map((item: any) => {
             if (!item.purpose) {
               item.purpose = 'Home';
+            }
+            // 兼容新字段 purposeName，方便后续匹配 purposes 表
+            if (!item.purposeName) {
+              item.purposeName = item.purpose;
             }
             return item;
           });

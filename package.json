@@ -13,7 +13,7 @@
     "@google/generative-ai": "^0.2.1",
     "@supabase/supabase-js": "^2.39.0",
     "date-fns": "^3.0.0",
-    "expo": "^54.0.30",
+    "expo": "~54.0.31",
     "expo-av": "^16.0.8",
     "expo-camera": "~17.0.10",
     "expo-constants": "^18.0.12",

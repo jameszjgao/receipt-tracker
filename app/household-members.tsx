@@ -43,7 +43,9 @@ export default function HouseholdMembersScreen() {
 
   // 加载并分类邀请列表的通用函数
   const loadAndClassifyInvitations = async (user: any, householdId: string) => {
+    console.log('Loading invitations for household:', householdId);
     const invitations = await getHouseholdInvitations(householdId);
+    console.log('Loaded invitations:', invitations.length, invitations);
     
     // 获取当前家庭的所有成员邮箱
     const { data: existingMembers } = await supabase
@@ -52,18 +54,34 @@ export default function HouseholdMembersScreen() {
       .eq('household_id', householdId);
     
     const existingUserIds = new Set(existingMembers?.map(m => m.user_id) || []);
+    console.log('Existing member IDs:', Array.from(existingUserIds));
     
     // 获取用户邮箱映射
+    // 注意：不直接查询 users 表，因为 RLS 策略可能阻止查询
+    // 改为使用 RPC 函数或从 auth.users 获取
     let userEmailMap = new Map<string, string>();
     if (existingUserIds.size > 0) {
-      const { data: users } = await supabase
-        .from('users')
-        .select('email, id')
-        .in('id', Array.from(existingUserIds));
-      
-      users?.forEach(u => {
-        userEmailMap.set(u.email.toLowerCase(), u.id);
-      });
+      try {
+        // 尝试使用 RPC 函数获取用户信息
+        const { data: usersData, error: rpcError } = await supabase.rpc('get_household_member_users', {
+          p_household_id: householdId
+        });
+        
+        if (!rpcError && usersData && Array.isArray(usersData)) {
+          usersData.forEach((u: any) => {
+            if (u.email && u.id) {
+              userEmailMap.set(u.email.toLowerCase(), u.id);
+            }
+          });
+        } else {
+          // RPC 函数失败，尝试从邀请记录中获取邮箱（如果可用）
+          // 或者静默处理，不阻塞功能
+          console.log('RPC function failed, skipping user email map:', rpcError);
+        }
+      } catch (err) {
+        // 静默处理错误，不阻塞功能
+        console.log('Error getting user emails:', err);
+      }
     }
     
     // 先按email去重，每个email只保留最新的邀请记录
@@ -92,14 +110,12 @@ export default function HouseholdMembersScreen() {
         if (!isMember) {
           pending.push(inv);
         }
+      } else if (inv.status === 'declined') {
+        // 被邀请者拒绝的
+        declined.push(inv);
       } else if (inv.status === 'cancelled') {
-        if (inv.inviterId === user.id) {
-          // 管理员撤销的
-          cancelled.push(inv);
-        } else {
-          // 用户拒绝的
-          declined.push(inv);
-        }
+        // 管理员取消的
+        cancelled.push(inv);
       } else if (inv.status === 'accepted') {
         if (!isMember) {
           // 已接受但不在成员列表中，说明被移除了
@@ -107,6 +123,13 @@ export default function HouseholdMembersScreen() {
         }
         // 如果isMember为true，说明用户还在，不显示在邀请列表中
       }
+    });
+    
+    console.log('Classified invitations:', {
+      pending: pending.length,
+      declined: declined.length,
+      cancelled: cancelled.length,
+      removed: removed.length,
     });
     
     setPendingInvitations(pending);
@@ -286,9 +309,7 @@ export default function HouseholdMembersScreen() {
       householdId: '', // 将在加载时填充
       inviterId: '',
       inviteeEmail: emailToInvite,
-      token: '',
       status: 'pending',
-      expiresAt: '',
       createdAt: new Date().toISOString(),
     };
     
@@ -439,10 +460,16 @@ export default function HouseholdMembersScreen() {
         </View>
 
         {/* 管理员看到的邀请组：待同意、已拒绝、已撤回、已移除 */}
-        {isCurrentUserAdmin && (pendingInvitations.length > 0 || declinedInvitations.length > 0 || cancelledInvitations.length > 0 || removedInvitations.length > 0) && (
+        {isCurrentUserAdmin && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Invitations</Text>
-            <View style={styles.compactList}>
+            {(pendingInvitations.length === 0 && declinedInvitations.length === 0 && cancelledInvitations.length === 0 && removedInvitations.length === 0) ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="mail-outline" size={32} color="#95A5A6" />
+                <Text style={styles.emptyStateSubtext}>No invitations yet</Text>
+              </View>
+            ) : (
+              <View style={styles.compactList}>
               {/* 待同意邀请 */}
               {pendingInvitations.map((invitation, index) => {
                 const totalPending = pendingInvitations.length;
@@ -551,6 +578,7 @@ export default function HouseholdMembersScreen() {
                 );
               })}
             </View>
+            )}
           </View>
         )}
       </ScrollView>

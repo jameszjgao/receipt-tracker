@@ -57,13 +57,17 @@ export default function HouseholdManageScreen() {
       const user = await getCurrentUser();
       if (!user) throw new Error('Not logged in');
 
+      // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+      const householdId = user.currentHouseholdId || user.householdId;
+      if (!householdId) throw new Error('No household selected');
+
       const { error } = await supabase
         .from('households')
         .update({ 
           name: householdName.trim(),
           address: householdAddress.trim() || null,
         })
-        .eq('id', user.householdId);
+        .eq('id', householdId);
 
       if (error) throw error;
 

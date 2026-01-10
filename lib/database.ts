@@ -13,7 +13,9 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
       throw new Error('Not logged in: Please sign in before saving receipt');
     }
     
-    if (!user.householdId) {
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) {
       console.error('User has no household ID');
       throw new Error('User not associated with household account, please sign in again');
     }
@@ -29,7 +31,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
     const { data: receiptData, error: receiptError } = await supabase
       .from('receipts')
       .insert({
-        household_id: user.householdId,
+        household_id: householdId,
         store_name: receipt.storeName,
         total_amount: receipt.totalAmount,
         currency: receipt.currency,
@@ -49,11 +51,11 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
       console.error('Receipt insert error:', receiptError);
       console.error('User info:', {
         userId: user.id,
-        householdId: user.householdId,
+        householdId: householdId,
         email: user.email,
       });
       console.error('Receipt data being inserted:', {
-        household_id: user.householdId,
+        household_id: householdId,
         store_name: receipt.storeName,
         total_amount: receipt.totalAmount,
         date: receipt.date,
@@ -68,7 +70,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
           '3. household_id mismatch - Please sign in again\n\n' +
           'Current user info:\n' +
           `- User ID: ${user.id}\n` +
-          `- Household ID: ${user.householdId || 'NULL (not associated)'}\n` +
+          `- Household ID: ${householdId || 'NULL (not associated)'}\n` +
           `- Email: ${user.email}\n\n` +
           'Please execute diagnose-rls-issue.sql script to view detailed status'
         );
@@ -84,7 +86,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
       const itemsToInsert: any[] = [];
 
       for (const item of receipt.items) {
-        let categoryId = item.categoryId;
+        let categoryId: string | null | undefined = item.categoryId;
         
         // 如果没有categoryId但有category对象，使用category.id
         if (!categoryId && item.category) {
@@ -115,7 +117,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
             const { data: defaultCategories } = await supabase
               .from('categories')
               .select('id')
-              .eq('household_id', user.householdId)
+              .eq('household_id', householdId)
               .eq('is_default', true)
               .limit(1);
             
@@ -124,7 +126,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
               const { data: anyCategories } = await supabase
                 .from('categories')
                 .select('id')
-                .eq('household_id', user.householdId)
+                .eq('household_id', householdId)
                 .limit(1);
               
               if (!anyCategories || anyCategories.length === 0) {
@@ -133,7 +135,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
                   'Please do one of the following:\n' +
                   '1. Execute add-default-categories-for-existing-users.sql in Supabase SQL Editor\n' +
                   '2. Or manually create at least one category in the app\n\n' +
-                  'Current user household ID: ' + (user.householdId || 'Unknown')
+                  'Current user household ID: ' + (householdId || 'Unknown')
                 );
               }
               categoryId = anyCategories[0].id;
@@ -149,7 +151,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
           receipt_id: receiptId,
           name: item.name,
           category_id: categoryId,
-          purpose: item.purpose || 'Personnel', // 确保 purpose 不为 null
+          purpose_id: item.purposeId ?? null,
           price: item.price,
           is_asset: item.isAsset !== undefined ? item.isAsset : false, // 确保 isAsset 不为 null
           confidence: item.confidence,
@@ -203,11 +205,15 @@ export async function updateReceipt(receiptId: string, receipt: Partial<Receipt>
     if (receipt.confidence !== undefined) updateData.confidence = receipt.confidence;
     if (receipt.imageUrl !== undefined) updateData.image_url = receipt.imageUrl;
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     const { error: receiptError } = await supabase
       .from('receipts')
       .update(updateData)
       .eq('id', receiptId)
-      .eq('household_id', user.householdId);
+      .eq('household_id', householdId);
 
     if (receiptError) throw receiptError;
 
@@ -236,7 +242,7 @@ export async function updateReceipt(receiptId: string, receipt: Partial<Receipt>
             receipt_id: receiptId,
             name: item.name,
             category_id: categoryId,
-            purpose: item.purpose || 'Personnel', // 确保 purpose 不为 null
+            purpose_id: item.purposeId ?? null,
             price: item.price,
             is_asset: item.isAsset !== undefined ? item.isAsset : false, // 确保 isAsset 不为 null
             confidence: item.confidence,
@@ -264,6 +270,10 @@ export async function getAllReceipts(): Promise<Receipt[]> {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     const { data, error } = await supabase
       .from('receipts')
       .select(`
@@ -272,14 +282,16 @@ export async function getAllReceipts(): Promise<Receipt[]> {
         created_by_user:users!created_by (
           id,
           email,
-          name
+          name,
+          current_household_id
         ),
         receipt_items (
           *,
-          categories (*)
+          categories (*),
+          purposes (*)
         )
       `)
-      .eq('household_id', user.householdId)
+      .eq('household_id', householdId)
       .order('created_at', { ascending: false })
       .order('created_at', { foreignTable: 'receipt_items', ascending: true });
 
@@ -313,6 +325,7 @@ export async function getAllReceipts(): Promise<Receipt[]> {
         id: row.created_by_user.id,
         email: row.created_by_user.email,
         name: row.created_by_user.name,
+        householdId: row.created_by_user.current_household_id,
       } : undefined,
       items: (row.receipt_items || []).map((item: any) => ({
         id: item.id,
@@ -327,7 +340,16 @@ export async function getAllReceipts(): Promise<Receipt[]> {
           createdAt: item.categories.created_at,
           updatedAt: item.categories.updated_at,
         } : undefined,
-        purpose: item.purpose,
+        purposeId: item.purpose_id ?? null,
+        purpose: item.purposes ? {
+          id: item.purposes.id,
+          householdId: item.purposes.household_id,
+          name: item.purposes.name,
+          color: item.purposes.color,
+          isDefault: item.purposes.is_default,
+          createdAt: item.purposes.created_at,
+          updatedAt: item.purposes.updated_at,
+        } : undefined,
         price: item.price,
         isAsset: item.is_asset,
         confidence: item.confidence,
@@ -343,7 +365,7 @@ export async function getAllReceipts(): Promise<Receipt[]> {
 export async function updateReceiptItem(
   receiptId: string,
   itemId: string,
-  field: 'categoryId' | 'purpose' | 'isAsset',
+  field: 'categoryId' | 'purposeId' | 'isAsset',
   value: any
 ): Promise<void> {
   try {
@@ -354,8 +376,8 @@ export async function updateReceiptItem(
     const updateData: any = {};
     if (field === 'categoryId') {
       updateData.category_id = value;
-    } else if (field === 'purpose') {
-      updateData.purpose = value;
+    } else if (field === 'purposeId') {
+      updateData.purpose_id = value;
     } else if (field === 'isAsset') {
       updateData.is_asset = value;
     }
@@ -380,11 +402,15 @@ export async function getMostFrequentCurrency(): Promise<string | null> {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     // 查询当前家庭的所有小票，统计币种出现频次
     const { data, error } = await supabase
       .from('receipts')
       .select('currency')
-      .eq('household_id', user.householdId)
+      .eq('household_id', householdId)
       .not('currency', 'is', null);
 
     if (error) {
@@ -428,6 +454,10 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     const { data, error } = await supabase
       .from('receipts')
       .select(`
@@ -436,15 +466,17 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
         created_by_user:users!created_by (
           id,
           email,
-          name
+          name,
+          current_household_id
         ),
         receipt_items (
           *,
-          categories (*)
+          categories (*),
+          purposes (*)
         )
       `)
       .eq('id', receiptId)
-      .eq('household_id', user.householdId)
+      .eq('household_id', householdId)
       .order('created_at', { foreignTable: 'receipt_items', ascending: true })
       .single();
 
@@ -482,6 +514,7 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
         id: data.created_by_user.id,
         email: data.created_by_user.email,
         name: data.created_by_user.name,
+        householdId: data.created_by_user.current_household_id,
       } : undefined,
       items: (data.receipt_items || []).map((item: any) => ({
         id: item.id,
@@ -496,7 +529,16 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
           createdAt: item.categories.created_at,
           updatedAt: item.categories.updated_at,
         } : undefined,
-        purpose: item.purpose,
+        purposeId: item.purpose_id ?? null,
+        purpose: item.purposes ? {
+          id: item.purposes.id,
+          householdId: item.purposes.household_id,
+          name: item.purposes.name,
+          color: item.purposes.color,
+          isDefault: item.purposes.is_default,
+          createdAt: item.purposes.created_at,
+          updatedAt: item.purposes.updated_at,
+        } : undefined,
         price: item.price,
         isAsset: item.is_asset,
         confidence: item.confidence,
@@ -566,12 +608,16 @@ export async function deleteReceipt(receiptId: string): Promise<void> {
       }
     }
 
+    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
+    const householdId = user.currentHouseholdId || user.householdId;
+    if (!householdId) throw new Error('No household selected');
+
     // 删除会级联删除商品项
     const { error } = await supabase
       .from('receipts')
       .delete()
       .eq('id', receiptId)
-      .eq('household_id', user.householdId);
+      .eq('household_id', householdId);
 
     if (error) throw error;
   } catch (error) {

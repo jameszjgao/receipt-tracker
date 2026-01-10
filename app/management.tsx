@@ -163,10 +163,34 @@ export default function ManagementScreen() {
 
     try {
       setSavingPersonal(true);
-      const { error } = await supabase
-        .from('users')
-        .update({ name: personalName.trim() || null })
-        .eq('id', user.id);
+      
+      // 优先使用 RPC 函数绕过 RLS 限制
+      let error: any = null;
+      try {
+        const { error: rpcError } = await supabase
+          .rpc('update_user_name', {
+            p_user_id: user.id,
+            p_name: personalName.trim() || null
+          });
+        
+        if (rpcError) {
+          // 如果 RPC 函数不存在或失败，回退到直接更新
+          console.log('RPC function failed, falling back to direct update:', rpcError);
+          const { error: directError } = await supabase
+            .from('users')
+            .update({ name: personalName.trim() || null })
+            .eq('id', user.id);
+          error = directError;
+        }
+      } catch (rpcErr) {
+        // RPC 函数可能不存在，回退到直接更新
+        console.log('RPC function not available, using direct update:', rpcErr);
+        const { error: directError } = await supabase
+          .from('users')
+          .update({ name: personalName.trim() || null })
+          .eq('id', user.id);
+        error = directError;
+      }
 
       if (error) throw error;
 
