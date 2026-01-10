@@ -42,20 +42,21 @@ export async function createInvitation(inviteeEmail: string): Promise<{ invitati
       return { invitation: null, error: new Error('Inviter email not found') };
     }
 
-    // 5. 准备插入数据（所有数据来自缓存，不查询数据库）
+    // 5. 获取家庭名称（从缓存，不查询数据库）
+    const household = await getCurrentHousehold();
+    const householdName = household?.name || 'a household';
+
+    // 6. 准备插入数据（所有数据来自缓存，不查询数据库）
     const createdAt = new Date().toISOString();
     const insertData = {
       household_id: householdId,
       inviter_id: authUser.id, // 来自认证系统
       inviter_email: inviterEmail, // 来自缓存
       invitee_email: inviteeEmail.toLowerCase().trim(), // 用户输入
+      household_name: householdName, // 家庭名称（从缓存）
       status: 'pending', // 自动生成的状态
       created_at: createdAt, // 创建时间
     };
-
-    // 6. 获取家庭名称（从缓存，不查询数据库）
-    const household = await getCurrentHousehold();
-    const householdName = household?.name || 'a household';
 
     // 7. 使用 RPC 函数插入邀请记录（绕过 RLS，避免权限问题）
     // 这样就不需要查询数据库，也不会触发 RLS 策略
@@ -64,6 +65,7 @@ export async function createInvitation(inviteeEmail: string): Promise<{ invitati
       p_inviter_id: authUser.id,
       p_inviter_email: inviterEmail,
       p_invitee_email: inviteeEmail.toLowerCase().trim(),
+      p_household_name: householdName, // 传递家庭名称
     });
 
     if (rpcError || !invitationId) {
@@ -86,13 +88,14 @@ export async function createInvitation(inviteeEmail: string): Promise<{ invitati
       let finalInvitationId: string | null = null;
 
       if (existingInvitation) {
-        // 如果已存在，更新现有记录：重置为pending状态，更新邀请者信息
+        // 如果已存在，更新现有记录：重置为pending状态，更新邀请者信息和家庭名称
         const { data: updateResult, error: updateError } = await supabase
           .from('household_invitations')
           .update({
             status: 'pending',
             inviter_id: authUser.id,
             inviter_email: inviterEmail,
+            household_name: householdName, // 更新家庭名称
             created_at: createdAt,
             accepted_at: null,
           })
@@ -144,6 +147,7 @@ export async function createInvitation(inviteeEmail: string): Promise<{ invitati
                 status: 'pending',
                 inviter_id: authUser.id,
                 inviter_email: inviterEmail,
+                household_name: householdName, // 更新家庭名称
                 created_at: createdAt,
                 accepted_at: null,
               })
@@ -327,6 +331,8 @@ export async function getInvitationById(invitationId: string): Promise<Household
       status: data.status,
       createdAt: data.created_at,
       acceptedAt: data.accepted_at,
+      householdName: data.household_name || undefined, // 添加家庭名称字段
+      inviterEmail: data.inviter_email || undefined, // 添加邀请者email字段
     };
   } catch (error) {
     console.error('Error getting invitation by id:', error);
@@ -378,63 +384,8 @@ export async function getPendingInvitationsForUser(): Promise<HouseholdInvitatio
         return [];
       }
       
-      // 如果查询成功，直接使用 inviter_email 字段（已存储在邀请记录中）
-      // 不再需要查询 users 表，避免 RLS 权限问题
-      if (data && data.length > 0 && !error) {
-        const householdIds = [...new Set(data.map((row: any) => row.household_id))];
-        
-        console.log('Fetching additional data:', {
-          householdIds,
-          dataLength: data.length,
-        });
-        
-        // 不再需要查询邀请者信息，因为 inviter_email 已经存储在邀请记录中
-        
-        // 获取家庭名称（仍然需要查询 households 表）
-        let households: any[] = [];
-        if (householdIds.length > 0) {
-          try {
-            const { data: householdsData, error: householdsError } = await supabase
-              .from('households')
-              .select('id, name')
-              .in('id', householdIds);
-            
-            console.log('Households query result:', {
-              hasData: !!householdsData,
-              dataLength: householdsData?.length || 0,
-              hasError: !!householdsError,
-              errorCode: householdsError?.code,
-              errorMessage: householdsError?.message,
-              households: householdsData,
-            });
-            
-            households = householdsData || [];
-          } catch (householdsErr) {
-            console.error('Error fetching households:', householdsErr);
-            households = [];
-          }
-        }
-        
-        // 将家庭名称添加到数据中（inviter_email 已经存储在邀请记录中，不需要合并）
-        if (data) {
-          data = data.map((row: any) => {
-            const household = households.find((h: any) => h.id === row.household_id);
-            
-            console.log('Merging data for row:', {
-              rowId: row.id,
-              householdId: row.household_id,
-              hasHousehold: !!household,
-              householdName: household?.name,
-              inviterEmail: row.inviter_email, // 直接使用 inviter_email 字段
-            });
-            
-            return {
-              ...row,
-              households: household ? { name: household.name } : null,
-            };
-          });
-        }
-      }
+      // 如果查询成功，直接使用 inviter_email 和 household_name 字段（已存储在邀请记录中）
+      // 不再需要查询 users 或 households 表，避免 RLS 权限问题
     } catch (queryError: any) {
       // 查询异常时，静默返回空数组，不阻塞登录流程
       console.log('Invitations query exception (non-blocking):', queryError.message);
@@ -446,31 +397,13 @@ export async function getPendingInvitationsForUser(): Promise<HouseholdInvitatio
       return [];
     }
 
+    // 直接使用数据库中的字段，不再需要额外查询
     return data.map((row: any) => {
-      // 提取家庭名称（可能是对象或数组）
-      let householdName: string | undefined = undefined;
-      if (row.households) {
-        if (Array.isArray(row.households) && row.households.length > 0) {
-          householdName = row.households[0].name;
-        } else if (typeof row.households === 'object' && row.households.name) {
-          householdName = row.households.name;
-        }
-      }
-
-      // 直接使用 inviter_email 字段（已存储在邀请记录中，不需要查询 users 表）
+      // 直接从数据库字段获取，不再查询households表
+      const householdName: string | undefined = row.household_name || undefined;
       const inviterEmail: string | undefined = row.inviter_email || undefined;
 
-      // 调试日志
-      console.log('Invitation data processed:', {
-        id: row.id,
-        householdName,
-        inviterEmail,
-        hasHouseholds: !!row.households,
-        householdsType: typeof row.households,
-        rawHouseholds: row.households,
-      });
-
-      const result = {
+      return {
         id: row.id,
         householdId: row.household_id,
         inviterId: row.inviter_id,
@@ -478,12 +411,9 @@ export async function getPendingInvitationsForUser(): Promise<HouseholdInvitatio
         status: row.status,
         createdAt: row.created_at,
         acceptedAt: row.accepted_at,
-        householdName: householdName || undefined, // 添加家庭名称字段
-        inviterEmail: inviterEmail || undefined, // 直接使用 inviter_email 字段
+        householdName: householdName || undefined, // 直接从数据库字段获取
+        inviterEmail: inviterEmail || undefined, // 直接从数据库字段获取
       };
-      
-      console.log('Final invitation result:', result);
-      return result;
     });
   } catch (error) {
     console.error('Error getting pending invitations for user:', error);

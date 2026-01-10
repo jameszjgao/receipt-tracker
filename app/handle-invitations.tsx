@@ -25,7 +25,7 @@ export default function HandleInvitationsScreen() {
   const [householdName, setHouseholdName] = useState('');
   const [inviterEmail, setInviterEmail] = useState('');
   const [acceptingInvite, setAcceptingInvite] = useState(false);
-  const [pendingInvitations, setPendingInvitations] = useState<Array<{ id: string; householdId: string; name: string; inviterEmail?: string }>>([]);
+  const [pendingInvitations, setPendingInvitations] = useState<Array<{ id: string; householdId: string; name: string; inviterEmail?: string; householdName?: string }>>([]);
   const [currentInvitationIndex, setCurrentInvitationIndex] = useState(0);
 
   useEffect(() => {
@@ -52,41 +52,26 @@ export default function HandleInvitationsScreen() {
         return;
       }
 
-      // 直接使用邀请数据中的家庭名称和邀请者email（已经在 getPendingInvitationsForUser 中获取）
-      // 如果家庭名称为空，尝试通过household_id查询补充
-      const invitationsWithNames: Array<{ id: string; householdId: string; name: string; inviterEmail?: string }> = [];
+      // 直接使用邀请数据中的家庭名称和邀请者email（已经在 getPendingInvitationsForUser 中从数据库获取）
+      // 不再需要查询households表，因为household_name已经存储在邀请记录中
+      const invitationsWithNames: Array<{ id: string; householdId: string; name: string; inviterEmail?: string; householdName?: string }> = [];
       
       for (const invitation of invitations) {
-        let householdName = invitation.householdName;
-        
-        // 如果家庭名称为空，尝试查询补充
-        if (!householdName && invitation.householdId) {
-          try {
-            const { data: householdData } = await supabase
-              .from('households')
-              .select('name')
-              .eq('id', invitation.householdId)
-              .single();
-            
-            if (householdData?.name) {
-              householdName = householdData.name;
-            }
-          } catch (err) {
-            console.log('Failed to fetch household name for invitation:', invitation.id, err);
-          }
-        }
+        // 直接使用从数据库获取的household_name，不再查询households表
+        const householdName = invitation.householdName || 'Unknown Household';
         
         console.log('Processing invitation:', {
           id: invitation.id,
-          householdName: householdName || invitation.householdName,
+          householdName: householdName,
           inviterEmail: invitation.inviterEmail,
         });
         
         invitationsWithNames.push({
           id: invitation.id,
           householdId: invitation.householdId,
-          name: householdName || invitation.householdName || 'Unknown Household',
+          name: householdName, // 使用从数据库获取的家庭名称
           inviterEmail: invitation.inviterEmail,
+          householdName: householdName, // 保存完整的家庭名称
         });
       }
       
@@ -109,7 +94,7 @@ export default function HandleInvitationsScreen() {
     }
   };
 
-  const showNextInvitation = (index: number, invitations: Array<{ id: string; householdId: string; name: string; inviterEmail?: string }>) => {
+  const showNextInvitation = (index: number, invitations: Array<{ id: string; householdId: string; name: string; inviterEmail?: string; householdName?: string }>) => {
     if (index < invitations.length) {
       const invitation = invitations[index];
       
@@ -117,11 +102,13 @@ export default function HandleInvitationsScreen() {
       console.log('Showing invitation:', {
         index,
         name: invitation.name,
+        householdName: invitation.householdName,
         inviterEmail: invitation.inviterEmail,
         householdId: invitation.householdId,
       });
       
-      setHouseholdName(invitation.name);
+      // 使用householdName字段（如果存在），否则使用name字段作为fallback
+      setHouseholdName(invitation.householdName || invitation.name || 'Unknown Household');
       setInviterEmail(invitation.inviterEmail || '');
       setInviteId(invitation.id);
       setInviteHouseholdId(invitation.householdId);
@@ -524,7 +511,7 @@ export default function HandleInvitationsScreen() {
                 </View>
                 <Text style={styles.modalTitle}>New Invitation</Text>
               </View>
-              {/* 突出显示邀请者email */}
+              {/* 突出显示邀请者email和家庭名称 */}
               <View style={styles.inviterEmailContainer}>
                 {inviterEmail ? (
                   <Text style={styles.inviterEmailMain}>{inviterEmail}</Text>
@@ -532,6 +519,12 @@ export default function HandleInvitationsScreen() {
                   <Text style={styles.inviterEmailMain}>Someone</Text>
                 )}
                 <Text style={styles.inviterEmailLabel}>has invited you to join Household</Text>
+                {/* 突出显示家庭名称 */}
+                {householdName && householdName !== 'Unknown Household' && (
+                  <View style={styles.householdNameContainer}>
+                    <Text style={styles.householdNameText}>{householdName}</Text>
+                  </View>
+                )}
               </View>
               <View style={styles.modalButtons}>
                 {/* 第一个按钮：接受 - 主要操作按钮，绿色，突出 */}
@@ -782,6 +775,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#636E72',
     textAlign: 'center',
+    marginBottom: 12,
+  },
+  householdNameContainer: {
+    marginTop: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    backgroundColor: '#F0F4FF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0E7FF',
+  },
+  householdNameText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#6C5CE7',
+    textAlign: 'center',
+    letterSpacing: 0.3,
   },
   emptyStateContainer: {
     flex: 1,

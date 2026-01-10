@@ -58,11 +58,13 @@ COMMENT ON INDEX idx_household_invitations_unique_email IS
 
 -- 第三步：更新RPC函数，使用UPSERT逻辑（先查找，存在则更新，不存在则插入）
 -- 注意：由于唯一索引是表达式索引，不能直接在ON CONFLICT中使用，所以使用先查找后更新的方式
+-- 添加 household_name 参数，用于在邀请记录中存储家庭名称，避免关联查询
 CREATE OR REPLACE FUNCTION create_household_invitation(
   p_household_id UUID,
   p_inviter_id UUID,
   p_inviter_email TEXT,
-  p_invitee_email TEXT
+  p_invitee_email TEXT,
+  p_household_name TEXT DEFAULT NULL
 )
 RETURNS UUID
 LANGUAGE plpgsql
@@ -74,7 +76,23 @@ DECLARE
   v_normalized_email TEXT := LOWER(TRIM(p_invitee_email));
   v_existing_id UUID;
   v_existing_status TEXT;
+  v_household_name TEXT;
 BEGIN
+  -- 如果没有传入household_name，尝试从数据库获取
+  IF p_household_name IS NULL OR p_household_name = '' THEN
+    SELECT name INTO v_household_name
+    FROM households
+    WHERE id = p_household_id
+    LIMIT 1;
+  ELSE
+    v_household_name := p_household_name;
+  END IF;
+  
+  -- 如果仍然没有获取到，使用默认值
+  IF v_household_name IS NULL OR v_household_name = '' THEN
+    v_household_name := 'a household';
+  END IF;
+
   -- 先检查是否已存在记录（基于household_id + normalized email）
   -- 只查找一条记录（由于唯一约束，应该只有一条）
   SELECT id, status INTO v_existing_id, v_existing_status
@@ -85,13 +103,14 @@ BEGIN
   LIMIT 1;
 
   IF v_existing_id IS NOT NULL THEN
-    -- 如果已存在，更新现有记录：重置为pending状态，更新邀请者信息
+    -- 如果已存在，更新现有记录：重置为pending状态，更新邀请者信息和家庭名称
     -- 无论之前是什么状态（accepted, declined, cancelled, removed），都重置为pending（重新邀请）
     UPDATE household_invitations
     SET
       status = 'pending',
       inviter_id = p_inviter_id,
       inviter_email = p_inviter_email,
+      household_name = v_household_name,  -- 更新家庭名称
       created_at = NOW(),  -- 更新创建时间，表示重新邀请
       accepted_at = NULL   -- 清除之前的接受时间
     WHERE id = v_existing_id
@@ -105,6 +124,7 @@ BEGIN
       inviter_id,
       inviter_email,
       invitee_email,
+      household_name,
       status,
       created_at
     )
@@ -113,6 +133,7 @@ BEGIN
       p_inviter_id,
       p_inviter_email,
       v_normalized_email,
+      v_household_name,  -- 保存家庭名称
       'pending',
       NOW()
     )
@@ -126,10 +147,13 @@ END;
 $$;
 
 -- 授予权限：允许已认证用户调用此函数
-GRANT EXECUTE ON FUNCTION create_household_invitation(UUID, UUID, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION create_household_invitation(UUID, UUID, TEXT, TEXT, TEXT) TO authenticated;
 
 -- 第四步：创建辅助函数，基于household_id + email查找邀请
-CREATE OR REPLACE FUNCTION get_invitation_by_household_email(
+-- 注意：如果函数已存在且返回类型不同，需要先删除再创建
+DROP FUNCTION IF EXISTS get_invitation_by_household_email(UUID, TEXT);
+
+CREATE FUNCTION get_invitation_by_household_email(
   p_household_id UUID,
   p_invitee_email TEXT
 )
@@ -139,6 +163,7 @@ RETURNS TABLE (
   inviter_id UUID,
   inviter_email TEXT,
   invitee_email TEXT,
+  household_name TEXT,
   status TEXT,
   created_at TIMESTAMP WITH TIME ZONE,
   accepted_at TIMESTAMP WITH TIME ZONE
@@ -157,6 +182,7 @@ BEGIN
     hi.inviter_id,
     hi.inviter_email,
     hi.invitee_email,
+    hi.household_name,
     hi.status,
     hi.created_at,
     hi.accepted_at
