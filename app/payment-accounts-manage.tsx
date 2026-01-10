@@ -170,15 +170,16 @@ export default function PaymentAccountsManageScreen() {
     Alert.alert(
       'Select Target Account',
       `Select which account to keep (others will be merged into it):\n\n${accountNames}`,
-      selectedAccounts.map(account => ({
-        text: account.name,
-        onPress: () => {
-          const sourceIds = Array.from(selectedAccountIds).filter(id => id !== account.id);
-          performMerge(sourceIds, account.id);
-        },
-      })).concat([
-        { text: 'Cancel', style: 'cancel', onPress: handleCancelMerge },
-      ])
+      [
+        ...selectedAccounts.map(account => ({
+          text: account.name,
+          onPress: () => {
+            const sourceIds = Array.from(selectedAccountIds).filter(id => id !== account.id);
+            performMerge(sourceIds, account.id);
+          },
+        })),
+        { text: 'Cancel', style: 'cancel' as const, onPress: handleCancelMerge },
+      ]
     );
   };
 

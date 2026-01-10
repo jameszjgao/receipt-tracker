@@ -7,7 +7,7 @@ export interface HouseholdInvitation {
   householdId: string;
   inviterId: string;
   inviteeEmail: string;
-  status: 'pending' | 'accepted' | 'expired' | 'cancelled' | 'declined';
+  status: 'pending' | 'accepted' | 'expired' | 'cancelled' | 'declined' | 'removed';
   createdAt: string;
   acceptedAt?: string;
   householdName?: string; // 可选的家庭名称字段
@@ -578,7 +578,7 @@ export async function getHouseholdInvitations(householdId: string): Promise<Hous
       .from('household_invitations')
       .select('*')
       .eq('household_id', householdId)
-      .in('status', ['pending', 'declined', 'cancelled', 'accepted'])
+      .in('status', ['pending', 'declined', 'cancelled', 'accepted', 'removed'])
       .order('created_at', { ascending: false });
 
     if (error) {

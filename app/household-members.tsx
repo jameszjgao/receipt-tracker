@@ -117,9 +117,12 @@ export default function HouseholdMembersScreen() {
       } else if (inv.status === 'cancelled') {
         // 管理员取消的
         cancelled.push(inv);
+      } else if (inv.status === 'removed') {
+        // 成员被移除的
+        removed.push(inv);
       } else if (inv.status === 'accepted') {
         if (!isMember) {
-          // 已接受但不在成员列表中，说明被移除了
+          // 已接受但不在成员列表中，说明被移除了（保持向后兼容）
           removed.push(inv);
         }
         // 如果isMember为true，说明用户还在，不显示在邀请列表中
@@ -349,19 +352,150 @@ export default function HouseholdMembersScreen() {
               if (!user) return;
               
               const householdId = user.currentHouseholdId || user.householdId;
-              const { error } = await supabase
-                .from('user_households')
-                .delete()
-                .eq('user_id', member.userId)
-                .eq('household_id', householdId);
-
-              if (error) throw error;
-              // 移除成员后，需要重新加载成员列表和邀请列表
-              await loadMembersOnly();
-              await loadInvitationsOnly();
-            } catch (error) {
+              const memberUserId = member.userId;
+              
+              // 步骤1：从user_households表中移除关联数据
+              // 优先使用 RPC 函数删除（绕过 RLS）
+              let deleteSuccess = false;
+              
+              try {
+                const { data: rpcResult, error: rpcError } = await supabase.rpc('remove_household_member', {
+                  p_target_user_id: memberUserId,
+                  p_household_id: householdId
+                });
+                
+                if (rpcError) {
+                  // RPC 函数不存在或失败，回退到直接删除
+                  console.log('RPC function failed, falling back to direct delete:', rpcError);
+                  const { error: deleteError } = await supabase
+                    .from('user_households')
+                    .delete()
+                    .eq('user_id', memberUserId)
+                    .eq('household_id', householdId);
+                  
+                  if (deleteError) {
+                    console.error('Error deleting user_households (direct delete):', deleteError);
+                    throw new Error(`Failed to remove member: ${deleteError.message || 'RLS policy may not allow DELETE operation. Please execute fix-user-households-delete-policy.sql in Supabase SQL Editor.'}`);
+                  } else {
+                    deleteSuccess = true;
+                  }
+                } else {
+                  deleteSuccess = true;
+                  console.log('Successfully removed member via RPC');
+                }
+              } catch (deleteErr: any) {
+                console.error('Error in member removal step:', deleteErr);
+                throw deleteErr;
+              }
+              
+              if (!deleteSuccess) {
+                throw new Error('Failed to remove member from household');
+              }
+              
+              // 步骤2：更新对应的邀请记录的状态为'removed'
+              // 查找所有与该成员相关的邀请记录（通过邮箱匹配）
+              try {
+                const { data: invitations, error: queryError } = await supabase
+                  .from('household_invitations')
+                  .select('id, invitee_email, status')
+                  .eq('household_id', householdId)
+                  .eq('invitee_email', member.email.toLowerCase().trim());
+                
+                if (queryError) {
+                  console.warn('Error querying invitations for update:', queryError);
+                } else if (invitations && invitations.length > 0) {
+                  // 更新所有相关的邀请记录状态为'removed'
+                  const invitationIds = invitations
+                    .filter(inv => inv.status === 'accepted' || inv.status === 'pending')
+                    .map(inv => inv.id);
+                  
+                  if (invitationIds.length > 0) {
+                    // 优先使用 RPC 函数批量更新邀请状态（绕过 RLS 和 CHECK 约束）
+                    const { data: rpcResult, error: rpcError } = await supabase.rpc('update_invitations_status_batch', {
+                      p_invitation_ids: invitationIds,
+                      p_new_status: 'removed'
+                    });
+                    
+                    if (rpcError) {
+                      // RPC 函数不存在或失败，回退到直接更新
+                      console.log('RPC function failed, falling back to direct update:', rpcError);
+                      const { error: updateInvitationError, data: updatedInvitations } = await supabase
+                        .from('household_invitations')
+                        .update({ status: 'removed' })
+                        .in('id', invitationIds)
+                        .select();
+                      
+                      if (updateInvitationError) {
+                        console.error('Error updating invitation status to removed (direct update):', updateInvitationError);
+                        // 如果直接更新也失败，可能是数据库约束问题，尝试使用 'cancelled' 作为备选
+                        const { error: fallbackError, data: fallbackData } = await supabase
+                          .from('household_invitations')
+                          .update({ status: 'cancelled' })
+                          .in('id', invitationIds)
+                          .select();
+                        
+                        if (fallbackError) {
+                          console.error('Error updating invitation status to cancelled (fallback):', fallbackError);
+                          // 即使备选方案也失败，继续执行其他步骤，不阻塞整个流程
+                          Alert.alert('Warning', 'Failed to update invitation status. Please execute update-invitation-status-rpc.sql in Supabase SQL Editor.');
+                        } else {
+                          console.log('Updated invitation status to cancelled (fallback):', fallbackData?.length || 0, 'invitations');
+                          Alert.alert('Warning', 'Updated invitation status to "cancelled" instead of "removed". Please execute update-invitation-status-rpc.sql to support "removed" status.');
+                        }
+                      } else {
+                        console.log('Successfully updated invitation status to removed (direct update):', updatedInvitations?.length || 0, 'invitations');
+                      }
+                    } else {
+                      console.log('Successfully updated invitation status to removed via RPC:', rpcResult || 0, 'invitations');
+                    }
+                  }
+                }
+              } catch (invitationError: any) {
+                console.error('Error in invitation update step:', invitationError);
+                // 捕获所有错误，继续执行其他步骤，不阻塞整个流程
+                Alert.alert('Warning', `Failed to update invitation status: ${invitationError?.message || 'Unknown error'}. Member removed, but invitation status may not be updated.`);
+              }
+              
+              // 步骤3：如果被删成员的current_household_id与当前household相同，则清空该字段
+              // 尝试使用RPC函数更新（即使无法获取用户信息，也尝试直接更新）
+              const { error: rpcUpdateError } = await supabase.rpc('update_user_current_household', {
+                p_user_id: memberUserId,
+                p_household_id: null,
+              });
+              
+              if (rpcUpdateError) {
+                // RPC函数不存在或失败，回退到直接更新（使用条件更新，只有current_household_id匹配时才更新）
+                console.log('RPC function failed, falling back to direct update:', rpcUpdateError);
+                const { error: updateError } = await supabase
+                  .from('users')
+                  .update({ current_household_id: null })
+                  .eq('id', memberUserId)
+                  .eq('current_household_id', householdId);
+                
+                if (updateError) {
+                  console.error('Error clearing current_household_id:', updateError);
+                  // 不抛出错误，继续执行（因为可能由于RLS限制无法更新）
+                }
+              }
+              
+              // 删除成功后，立即从状态中移除该成员（乐观更新）
+              setMembers(prev => prev.filter(m => m.userId !== memberUserId));
+              
+              // 重新加载成员列表和邀请列表以确保数据一致性
+              await Promise.all([
+                loadMembersOnly(),
+                loadInvitationsOnly()
+              ]);
+            } catch (error: any) {
               console.error('Error removing member:', error);
-              Alert.alert('Error', 'Failed to remove member');
+              Alert.alert('Error', error?.message || 'Failed to remove member');
+              // 如果出错，重新加载以确保数据一致
+              try {
+                await loadMembersOnly();
+                await loadInvitationsOnly();
+              } catch (reloadError) {
+                console.error('Error reloading members after removal failure:', reloadError);
+              }
             }
           },
         },
