@@ -29,7 +29,24 @@ export default function LoginScreen() {
     if (params.email) {
       setEmail(params.email);
     }
+    
+    // 检查是否已有登录session，如果有则自动跳转
+    checkExistingSession();
   }, [params]);
+
+  const checkExistingSession = async () => {
+    try {
+      const { isAuthenticated } = await import('@/lib/auth');
+      const authenticated = await isAuthenticated();
+      if (authenticated) {
+        // 已有session，跳转到首页（首页会处理后续逻辑）
+        router.replace('/');
+      }
+    } catch (error) {
+      // 静默处理错误，不影响登录流程
+      console.log('Session check failed (non-blocking):', error);
+    }
+  };
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {

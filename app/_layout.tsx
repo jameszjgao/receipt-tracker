@@ -55,19 +55,33 @@ export default function RootLayout() {
         <Stack.Screen 
           name="categories-manage" 
           options={{ 
-            title: 'Manage Categories'
+            title: 'Manage Categories',
+            headerBackTitle: 'Back',
+            headerBackButtonVisible: true,
           }} 
         />
         <Stack.Screen 
           name="purposes-manage" 
           options={{ 
-            title: 'Manage Purposes'
+            title: 'Manage Purposes',
+            headerBackTitle: 'Back',
+            headerBackButtonVisible: true,
           }} 
         />
         <Stack.Screen 
           name="payment-accounts-manage" 
           options={{ 
-            title: 'Manage Payment Accounts'
+            title: 'Manage Payment Accounts',
+            headerBackTitle: 'Back',
+            headerBackButtonVisible: true,
+          }} 
+        />
+        <Stack.Screen 
+          name="household-members" 
+          options={{ 
+            title: 'Household Members',
+            headerBackTitle: 'Back',
+            headerBackButtonVisible: true,
           }} 
         />
         <Stack.Screen 

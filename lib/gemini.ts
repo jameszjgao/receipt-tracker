@@ -8,18 +8,14 @@ import { GeminiReceiptResult } from '@/types';
 import { getAvailableImageModel } from './gemini-helper';
 import { getMostFrequentCurrency } from './database';
 
-const apiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+// 安全获取Gemini API Key，支持多种方式（包括EAS Secrets）
+const apiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
 
-if (!apiKey) {
-  console.error('Gemini API Key check:', {
-    fromConfig: !!Constants.expoConfig?.extra?.geminiApiKey,
-    fromPublicEnv: !!process.env.EXPO_PUBLIC_GEMINI_API_KEY,
-    fromEnv: !!process.env.GEMINI_API_KEY,
-  });
-  throw new Error('Missing Gemini API Key. Please check GEMINI_API_KEY configuration in .env file');
-}
-
-const genAI = new GoogleGenerativeAI(apiKey);
+// 使用安全的默认值初始化，避免启动时崩溃
+// 实际使用时会在函数内部检查
+const genAI = apiKey && apiKey !== '' && apiKey !== 'placeholder-key'
+  ? new GoogleGenerativeAI(apiKey)
+  : new GoogleGenerativeAI('placeholder-key'); // 占位符，实际使用时会检查
 
 // 尝试多个可能的模型名称（按优先级排序，优先使用最快的模型）
 // gemini-1.5-flash 是最快的模型，适合实时处理
@@ -37,6 +33,13 @@ let availableModelCache: string | null = null;
 
 // 识别小票内容（使用图片 URL）
 export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptResult> {
+  // 验证 API Key 是否配置
+  if (!apiKey || apiKey === '' || apiKey === 'placeholder-key') {
+    const error = new Error('Gemini API Key 未配置。请在 EAS Secrets 中设置 EXPO_PUBLIC_GEMINI_API_KEY。') as any;
+    error.code = 'GEMINI_API_KEY_MISSING';
+    throw error;
+  }
+
   // 记录尝试使用的模型和 API Key 信息
   console.log('Starting receipt recognition with image URL...');
   console.log('Image URL:', imageUrl);

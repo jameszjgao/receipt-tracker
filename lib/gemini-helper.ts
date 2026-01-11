@@ -2,13 +2,8 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Constants from 'expo-constants';
 
-const apiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-
-if (!apiKey) {
-  throw new Error('Missing Gemini API Key');
-}
-
-const genAI = new GoogleGenerativeAI(apiKey);
+// 安全获取Gemini API Key，支持多种方式（包括EAS Secrets）
+const apiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
 
 // 列出所有可用模型
 export async function listAvailableModels() {
