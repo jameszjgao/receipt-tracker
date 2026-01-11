@@ -19,7 +19,7 @@ export default {
     android: {
       package: 'com.snapreceipt.app',
       versionCode: 1,
-      usesCleartextTraffic: true
+      usesCleartextTraffic: true,
       permissions: [
         'CAMERA',
         'READ_EXTERNAL_STORAGE',

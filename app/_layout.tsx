@@ -118,12 +118,6 @@ export default function RootLayout() {
           }} 
         />
         <Stack.Screen 
-          name="household-members" 
-          options={{ 
-            title: 'Household Members'
-          }} 
-        />
-        <Stack.Screen 
           name="profile" 
           options={{ 
             title: 'Personal Information'

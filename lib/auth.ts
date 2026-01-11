@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, validateSupabaseConfig } from './supabase';
 import { User, Household, UserHousehold } from '@/types';
 import { createDefaultCategoriesAndAccounts } from './auth-helper';
 import Constants from 'expo-constants';
@@ -713,6 +713,21 @@ export async function createHousehold(name: string, address?: string): Promise<{
 // 注册新用户（两步注册：第一步只创建用户，不创建家庭）
 export async function signUp(email: string, password: string, householdName?: string, userName?: string): Promise<{ user: User | null; error: Error | null }> {
   try {
+    // 验证 Supabase 配置
+    const config = validateSupabaseConfig();
+    if (!config.valid) {
+      return {
+        user: null,
+        error: new Error(
+          '网络配置错误：Supabase 未正确配置。\n\n' +
+          '请在 EAS Secrets 中设置：\n' +
+          '- EXPO_PUBLIC_SUPABASE_URL\n' +
+          '- EXPO_PUBLIC_SUPABASE_ANON_KEY\n\n' +
+          '然后重新构建应用。'
+        ),
+      };
+    }
+
     // 创建认证用户
     // 注意：如果 Supabase 启用了邮箱确认，注册后需要确认邮箱才能登录
     // 邮箱确认后，用户会被重定向到应用的登录页面
@@ -1001,6 +1016,20 @@ export async function signUp(email: string, password: string, householdName?: st
 // 登录
 export async function signIn(email: string, password: string): Promise<{ error: Error | null }> {
   try {
+    // 验证 Supabase 配置
+    const config = validateSupabaseConfig();
+    if (!config.valid) {
+      return {
+        error: new Error(
+          '网络配置错误：Supabase 未正确配置。\n\n' +
+          '请在 EAS Secrets 中设置：\n' +
+          '- EXPO_PUBLIC_SUPABASE_URL\n' +
+          '- EXPO_PUBLIC_SUPABASE_ANON_KEY\n\n' +
+          '然后重新构建应用。'
+        ),
+      };
+    }
+
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
