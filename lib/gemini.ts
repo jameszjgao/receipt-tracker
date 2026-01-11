@@ -33,8 +33,18 @@ let availableModelCache: string | null = null;
 
 // 识别小票内容（使用图片 URL）
 export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptResult> {
+  // 重新获取 API Key（确保使用最新的值）
+  const currentApiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
+  
+  // 调试日志
+  console.log('=== Gemini API Key Debug ===');
+  console.log('Constants.expoConfig?.extra?.geminiApiKey:', Constants.expoConfig?.extra?.geminiApiKey ? `Present (length: ${Constants.expoConfig.extra.geminiApiKey.length})` : 'Missing');
+  console.log('process.env.EXPO_PUBLIC_GEMINI_API_KEY:', process.env.EXPO_PUBLIC_GEMINI_API_KEY ? `Present (length: ${process.env.EXPO_PUBLIC_GEMINI_API_KEY.length})` : 'Missing');
+  console.log('Final currentApiKey:', currentApiKey ? `Present (length: ${currentApiKey.length})` : 'Missing');
+  console.log('===========================');
+  
   // 验证 API Key 是否配置
-  if (!apiKey || apiKey === '' || apiKey === 'placeholder-key') {
+  if (!currentApiKey || currentApiKey === '' || currentApiKey === 'placeholder-key') {
     const error = new Error('Gemini API Key 未配置。请在 EAS Secrets 中设置 EXPO_PUBLIC_GEMINI_API_KEY。') as any;
     error.code = 'GEMINI_API_KEY_MISSING';
     throw error;
@@ -43,10 +53,13 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
   // 记录尝试使用的模型和 API Key 信息
   console.log('Starting receipt recognition with image URL...');
   console.log('Image URL:', imageUrl);
-  console.log('API Key present:', !!apiKey, 'Length:', apiKey?.length || 0);
-  if (apiKey) {
-    console.log('API Key prefix:', apiKey.substring(0, 10) + '...');
+  console.log('API Key present:', !!currentApiKey, 'Length:', currentApiKey?.length || 0);
+  if (currentApiKey) {
+    console.log('API Key prefix:', currentApiKey.substring(0, 10) + '...');
   }
+  
+  // 使用当前获取的 API Key 创建新的 genAI 实例
+  const currentGenAI = new GoogleGenerativeAI(currentApiKey);
 
   // 首先尝试从 API 获取可用模型（如果缓存为空）
   if (!availableModelCache) {
@@ -217,7 +230,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
   for (const modelName of modelsToTry) {
     try {
       console.log(`Trying model: ${modelName}...`);
-      const model = genAI.getGenerativeModel({ model: modelName });
+      const model = currentGenAI.getGenerativeModel({ model: modelName });
 
       console.log('Sending request to Gemini API...');
       const result = await model.generateContent([prompt, imagePart]);
@@ -388,6 +401,17 @@ Please return strictly in JSON format without any extra text. JSON format as fol
 
 // 从文字识别小票内容
 export async function recognizeReceiptFromText(text: string): Promise<GeminiReceiptResult> {
+  // 重新获取 API Key（确保使用最新的值）
+  const currentApiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
+  
+  if (!currentApiKey || currentApiKey === '' || currentApiKey === 'placeholder-key') {
+    const error = new Error('Gemini API Key 未配置。请在 EAS Secrets 中设置 EXPO_PUBLIC_GEMINI_API_KEY。') as any;
+    error.code = 'GEMINI_API_KEY_MISSING';
+    throw error;
+  }
+  
+  const currentGenAI = new GoogleGenerativeAI(currentApiKey);
+  
   console.log('Starting receipt recognition with text...');
   console.log('Text input:', text);
 
@@ -405,6 +429,22 @@ export async function recognizeReceiptFromText(text: string): Promise<GeminiRece
     categoryNames = ['Food', 'Dining Out', 'Home', 'Transportation', 'Shopping', 'Medical', 'Education'];
   }
 
+  // 获取用户的用途列表
+  let purposeNames: string[] = [];
+  try {
+    const purposes = await getPurposes();
+    purposeNames = purposes.map(p => p.name);
+  } catch (error) {
+    console.warn('Failed to fetch purposes, using default list:', error);
+    // 如果获取失败，使用默认用途列表
+    purposeNames = ['Home', 'Gifts', 'Business'];
+  }
+
+  // 如果用途列表为空，使用默认用途
+  if (purposeNames.length === 0) {
+    purposeNames = ['Home', 'Gifts', 'Business'];
+  }
+
   // 获取用户历史小票中最频繁的币种，作为默认币种
   let defaultCurrency = 'USD'; // 文本识别的默认值
   try {
@@ -420,6 +460,7 @@ export async function recognizeReceiptFromText(text: string): Promise<GeminiRece
   }
 
   const categoryList = categoryNames.join(', ');
+  const purposeList = purposeNames.join(', ');
 
   const now = new Date();
   const today = now.toISOString().split('T')[0];
@@ -582,7 +623,7 @@ Example JSON format:
     for (const modelName of modelsToTry) {
       try {
         console.log(`Trying model: ${modelName}`);
-        const model = genAI.getGenerativeModel({ model: modelName });
+        const model = currentGenAI.getGenerativeModel({ model: modelName });
 
         // 使用文本提示
         const result = await model.generateContent(prompt);
@@ -736,6 +777,17 @@ Example JSON format:
 
 // 从音频识别小票内容
 export async function recognizeReceiptFromAudio(audioUri: string): Promise<GeminiReceiptResult> {
+  // 重新获取 API Key（确保使用最新的值）
+  const currentApiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
+  
+  if (!currentApiKey || currentApiKey === '' || currentApiKey === 'placeholder-key') {
+    const error = new Error('Gemini API Key 未配置。请在 EAS Secrets 中设置 EXPO_PUBLIC_GEMINI_API_KEY。') as any;
+    error.code = 'GEMINI_API_KEY_MISSING';
+    throw error;
+  }
+  
+  const currentGenAI = new GoogleGenerativeAI(currentApiKey);
+  
   console.log('Starting receipt recognition with audio...');
   console.log('Audio URI:', audioUri);
 
@@ -865,7 +917,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
     for (const modelName of modelsToTry) {
       try {
         console.log(`Trying model: ${modelName}`);
-        const model = genAI.getGenerativeModel({ model: modelName });
+        const model = currentGenAI.getGenerativeModel({ model: modelName });
 
         // 使用音频和文本提示
         const result = await model.generateContent([
