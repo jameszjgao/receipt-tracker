@@ -52,14 +52,18 @@ export async function getAvailableImageModel(): Promise<string | null> {
       );
       if (found) {
         console.log('Found preferred image model:', found.name);
-        return found.name;
+        // 移除 models/ 前缀（如果存在）
+        const modelName = found.name.replace(/^models\//, '');
+        return modelName;
       }
     }
     
     // 如果没找到，返回第一个支持的模型
     if (supportedModels.length > 0) {
       console.log('Using first available model:', supportedModels[0].name);
-      return supportedModels[0].name;
+      // 移除 models/ 前缀（如果存在）
+      const modelName = supportedModels[0].name.replace(/^models\//, '');
+      return modelName;
     }
     
     return null;

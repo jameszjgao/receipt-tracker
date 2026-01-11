@@ -361,12 +361,15 @@ Please return strictly in JSON format without any extra text. JSON format as fol
         errorMsg.includes('generativelanguage.googleapis.com')) {
       throw new Error(
         `Network connection failed\n\n` +
-        `Important note:\n` +
-        `Direct access to Google API (googleapis.com) may not be available in mainland China\n\n` +
-        `Solutions:\n` +
-        `1. Use VPN/proxy to connect to Google API\n` +
-        `2. Use a proxy server that supports Google API\n` +
-        `3. Check firewall/network settings\n\n` +
+        `Possible causes:\n` +
+        `1. API Key not configured or invalid\n` +
+        `2. Network connectivity issue\n` +
+        `3. Google API service temporarily unavailable\n` +
+        `4. Firewall or proxy blocking the request\n\n` +
+        `Please check:\n` +
+        `- Gemini API Key is set in EAS Secrets (EXPO_PUBLIC_GEMINI_API_KEY)\n` +
+        `- Network connection is working\n` +
+        `- API Key is valid and has proper permissions\n\n` +
         `Original error: ${lastError.message}`
       );
     }
