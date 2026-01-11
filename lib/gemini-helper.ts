@@ -3,7 +3,19 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import Constants from 'expo-constants';
 
 // 安全获取Gemini API Key，支持多种方式（包括EAS Secrets）
-const apiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
+const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || Constants.expoConfig?.extra?.geminiApiKey || '';
+
+// 强力推荐：在下方加一个简单的环境检查，打包后的 APK 如果报错，你能立刻知道是不是 Key 的问题
+if (!apiKey || apiKey === 'undefined') {
+  console.error("Gemini API Key is missing or invalid!");
+  // 在预览版 APK 中，弹窗是最高效的调试手段
+  if (__DEV__) {
+    console.warn("API Key is missing in development");
+  } else {
+    // 这里的 alert 会在 APK 运行到这一步时跳出来
+    // alert("Configuration Error: Gemini API Key not found");
+  }
+}
 
 // 列出所有可用模型
 export async function listAvailableModels() {
