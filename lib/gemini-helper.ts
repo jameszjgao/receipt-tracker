@@ -2,46 +2,81 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Constants from 'expo-constants';
 
-// 安全获取Gemini API Key，支持多种方式（包括EAS Secrets）
-const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || Constants.expoConfig?.extra?.geminiApiKey || '';
+/**
+ * 严格获取 API Key
+ * 排除 EAS 可能注入的 "${EXPO_PUBLIC_...}" 这种无效字符串
+ */
+const getSafeApiKey = (): string => {
+  const key = process.env.EXPO_PUBLIC_GEMINI_API_KEY || 
+              Constants.expoConfig?.extra?.geminiApiKey || 
+              '';
+  
+  // 核心修复：如果 Key 包含 ${ 符号，说明是 EAS 占位符注入失败，视为空
+  if (key.includes('${') || key === 'undefined' || !key) {
+    return '';
+  }
+  return key;
+};
 
-// 强力推荐：在下方加一个简单的环境检查，打包后的 APK 如果报错，你能立刻知道是不是 Key 的问题
-if (!apiKey || apiKey === 'undefined') {
-  console.error("Gemini API Key is missing or invalid!");
-  // 在预览版 APK 中，弹窗是最高效的调试手段
-  if (__DEV__) {
-    console.warn("API Key is missing in development");
-  } else {
-    // 这里的 alert 会在 APK 运行到这一步时跳出来
-    // alert("Configuration Error: Gemini API Key not found");
+const apiKey = getSafeApiKey();
+
+/**
+ * 校验 Key 是否存在
+ * 如果是在打包后的 APK (非 __DEV__) 中发现 Key 缺失，直接弹窗告知用户原因
+ */
+if (!apiKey) {
+  const errorMsg = "Gemini API Key 未配置或注入失败（检测到占位符）";
+  console.error(errorMsg);
+  if (!__DEV__) {
+    // 只有在非开发环境下才弹窗，方便 APK 调试
+    // alert(errorMsg); 
   }
 }
 
 // 列出所有可用模型
 export async function listAvailableModels() {
+  if (!apiKey) {
+    throw new Error("API_KEY_MISSING");
+  }
+
   try {
-    // 注意：@google/generative-ai SDK 可能没有直接的 listModels 方法
-    // 我们可以通过直接调用 REST API 来获取
-    const response = await fetch('https://generativelanguage.googleapis.com/v1/models?key=' + apiKey);
+    // 增加超时控制，防止网络环境差导致应用卡死
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`,
+      { signal: controller.signal }
+    );
     
+    clearTimeout(timeoutId);
+
     if (!response.ok) {
-      throw new Error(`Failed to fetch models: ${response.status} ${response.statusText}`);
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`Google API Error: ${response.status} - ${errorData?.error?.message || response.statusText}`);
     }
     
     const data = await response.json();
     return data.models || [];
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error listing models:', error);
+    // 针对网络连接失败（通常是没挂代理）给出明确提示
+    if (error.message === 'Aborted' || error.message.includes('Network request failed')) {
+      throw new Error("NETWORK_ERROR_OR_PROXY_REQUIRED");
+    }
     throw error;
   }
 }
 
 // 获取支持图像输入的第一个可用模型
 export async function getAvailableImageModel(): Promise<string | null> {
+  // 兜底模型：如果动态获取失败，至少尝试使用这个公认的模型
+  const FALLBACK_MODEL = 'gemini-1.5-flash';
+
   try {
+    if (!apiKey) return null;
+
     const models = await listAvailableModels();
-    
-    console.log('Available models:', models.map((m: any) => m.name));
     
     // 查找支持 generateContent 的模型
     const supportedModels = models.filter((m: any) => 
@@ -49,39 +84,30 @@ export async function getAvailableImageModel(): Promise<string | null> {
       m.supportedGenerationMethods.includes('generateContent')
     );
     
-    console.log('Models supporting generateContent:', supportedModels.map((m: any) => m.name));
-    
-    // 优先查找支持图像的多模态模型
-    const imageModels = [
+    // 优先级排序
+    const preferredModels = [
       'gemini-1.5-flash',
       'gemini-1.5-pro',
       'gemini-pro-vision',
     ];
     
-    for (const preferredModel of imageModels) {
+    for (const preferred of preferredModels) {
       const found = supportedModels.find((m: any) => 
-        m.name.includes(preferredModel) || m.name === preferredModel
+        m.name.includes(preferred) || m.name === `models/${preferred}`
       );
       if (found) {
-        console.log('Found preferred image model:', found.name);
-        // 移除 models/ 前缀（如果存在）
-        const modelName = found.name.replace(/^models\//, '');
-        return modelName;
+        return found.name.replace(/^models\//, '');
       }
     }
     
-    // 如果没找到，返回第一个支持的模型
     if (supportedModels.length > 0) {
-      console.log('Using first available model:', supportedModels[0].name);
-      // 移除 models/ 前缀（如果存在）
-      const modelName = supportedModels[0].name.replace(/^models\//, '');
-      return modelName;
+      return supportedModels[0].name.replace(/^models\//, '');
     }
     
-    return null;
-  } catch (error) {
-    console.error('Error getting available image model:', error);
-    return null;
+    return FALLBACK_MODEL;
+  } catch (error: any) {
+    console.warn('无法动态获取模型列表，使用默认模型:', error.message);
+    // 如果是因为网络原因获取列表失败，返回默认模型尝试直接通信
+    return FALLBACK_MODEL;
   }
 }
-
