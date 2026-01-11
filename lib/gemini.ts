@@ -45,7 +45,8 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
   
   // 验证 API Key 是否配置
   if (!currentApiKey || currentApiKey === '' || currentApiKey === 'placeholder-key') {
-    const error = new Error('Gemini API Key 未配置。请在 EAS Secrets 中设置 EXPO_PUBLIC_GEMINI_API_KEY。') as any;
+    const errorMsg = `Gemini API Key 未配置。\n\n调试信息：\n- Constants.expoConfig?.extra?.geminiApiKey: ${Constants.expoConfig?.extra?.geminiApiKey ? '存在' : '不存在'}\n- process.env.EXPO_PUBLIC_GEMINI_API_KEY: ${process.env.EXPO_PUBLIC_GEMINI_API_KEY ? '存在' : '不存在'}\n- 当前 API Key 值: ${currentApiKey || '(空)'}\n\n请在 EAS Secrets 中设置 EXPO_PUBLIC_GEMINI_API_KEY，然后重新构建应用。`;
+    const error = new Error(errorMsg) as any;
     error.code = 'GEMINI_API_KEY_MISSING';
     throw error;
   }

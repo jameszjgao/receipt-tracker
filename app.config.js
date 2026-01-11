@@ -2,7 +2,7 @@ export default {
   expo: {
     name: 'Snap Receipt',
     slug: 'snap-receipt',
-    version: '1.0.9',
+    version: '1.0.11',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
@@ -18,7 +18,7 @@ export default {
     },
     android: {
       package: 'com.snapreceipt.app',
-      versionCode: 1,
+      versionCode: 3,
       usesCleartextTraffic: true,
       permissions: [
         'CAMERA',
