@@ -8,15 +8,19 @@ import { GeminiReceiptResult } from '@/types';
 import { getAvailableImageModel } from './gemini-helper';
 import { getMostFrequentCurrency } from './database';
 
-// 安全获取Gemini API Key，支持多种方式（包括EAS Secrets）
-const apiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
+// 引用 gemini-helper 中处理好的安全判断逻辑（如果 gemini-helper 导出了 apiKey）
+// 或者直接在此处复制安全获取逻辑：
+const getSafeKey = () => {
+  const k = process.env.EXPO_PUBLIC_GEMINI_API_KEY || Constants.expoConfig?.extra?.geminiApiKey || '';
+  return (k.includes('${') || k === 'undefined') ? '' : k;
+};
 
-// 使用安全的默认值初始化，避免启动时崩溃
-// 实际使用时会在函数内部检查
-const genAI = apiKey && apiKey !== '' && apiKey !== 'placeholder-key'
-  ? new GoogleGenerativeAI(apiKey)
-  : new GoogleGenerativeAI('placeholder-key'); // 占位符，实际使用时会检查
+const apiKey = getSafeKey();
 
+const genAI = (apiKey && apiKey !== '') 
+  ? new GoogleGenerativeAI(apiKey) 
+  : null;
+  
 // 尝试多个可能的模型名称（按优先级排序，优先使用最快的模型）
 // gemini-1.5-flash 是最快的模型，适合实时处理
 const POSSIBLE_MODELS = [
