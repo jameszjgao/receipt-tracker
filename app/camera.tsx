@@ -16,12 +16,24 @@ export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessing, setIsProcessing] = useState(false);
   const [capturedReceiptId, setCapturedReceiptId] = useState<string | null>(null);
+  const [storagePermission, setStoragePermission] = useState<ImagePicker.MediaLibraryPermissionResponse | null>(null);
   const cameraRef = useRef<CameraView>(null);
   const router = useRouter();
 
   useEffect(() => {
     checkAuth();
+    checkStoragePermission();
   }, []);
+
+  const checkStoragePermission = async () => {
+    try {
+      const permission = await ImagePicker.getMediaLibraryPermissionsAsync();
+      setStoragePermission(permission);
+      console.log('存储权限状态:', permission.status);
+    } catch (error) {
+      console.error('检查存储权限失败:', error);
+    }
+  };
 
   const checkAuth = async () => {
     const authenticated = await isAuthenticated();
@@ -38,7 +50,16 @@ export default function CameraScreen() {
     return (
       <View style={styles.container}>
         <Text style={styles.message}>Camera permission is required to capture receipts</Text>
-        <TouchableOpacity style={styles.button} onPress={requestPermission}>
+        <TouchableOpacity style={styles.button} onPress={async () => {
+          const result = await requestPermission();
+          if (!result.granted) {
+            Alert.alert(
+              'Permission Required',
+              'Camera permission is required to capture receipts. Please grant permission in settings.',
+              [{ text: 'OK' }]
+            );
+          }
+        }}>
           <Text style={styles.buttonText}>Grant Permission</Text>
         </TouchableOpacity>
       </View>
@@ -53,61 +74,129 @@ export default function CameraScreen() {
 
     try {
       setIsProcessing(true);
+      console.log('=== 开始拍照流程 ===');
+      
+      // 检查并请求存储权限（用于保存照片）
+      console.log('[步骤 1/6] 检查存储权限...');
+      let mediaPermission = await ImagePicker.getMediaLibraryPermissionsAsync();
+      console.log('[步骤 1/6] 存储权限状态:', mediaPermission.status, mediaPermission.granted);
+      
+      if (!mediaPermission.granted) {
+        console.log('[步骤 1/6] 请求存储权限...');
+        mediaPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        console.log('[步骤 1/6] 请求后权限状态:', mediaPermission.status, mediaPermission.granted);
+        
+        if (!mediaPermission.granted) {
+          setIsProcessing(false);
+          Alert.alert(
+            'Permission Required',
+            'Storage permission is required to save photos. Please grant permission in settings.',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+      }
+      setStoragePermission(mediaPermission);
+      console.log('[步骤 1/6] ✅ 存储权限已授予');
       
       // 拍摄照片
-      console.log('开始拍摄照片...');
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.6, // 先以较高质量拍摄
-        base64: false,
-        skipProcessing: false, // 确保进行图片处理
-      });
-
-      if (!photo || !photo.uri) {
+      console.log('[步骤 2/6] 开始拍摄照片...');
+      let photo;
+      try {
+        photo = await cameraRef.current.takePictureAsync({
+          quality: 0.6,
+          base64: false,
+          skipProcessing: false,
+        });
+        console.log('[步骤 2/6] takePictureAsync 返回结果:', photo ? '成功' : '失败');
+      } catch (captureError) {
+        console.error('[步骤 2/6] ❌ 拍照失败:', captureError);
         setIsProcessing(false);
-        Alert.alert('Error', 'Failed to capture image. Please try again.');
-        console.error('Photo capture failed: photo is null or uri is missing');
+        const errorMsg = captureError instanceof Error ? captureError.message : String(captureError);
+        Alert.alert(
+          'Capture Failed',
+          `Failed to capture photo: ${errorMsg}\n\nPlease try again.`,
+          [{ text: 'OK' }]
+        );
         return;
       }
 
-      console.log('照片拍摄成功，URI:', photo.uri);
+      if (!photo || !photo.uri) {
+        setIsProcessing(false);
+        console.error('[步骤 2/6] ❌ Photo capture failed: photo is null or uri is missing');
+        Alert.alert('Error', 'Failed to capture image. Photo object is invalid.');
+        return;
+      }
+
+      console.log('[步骤 2/6] ✅ 照片拍摄成功');
+      console.log('[步骤 2/6] 照片 URI:', photo.uri);
+      console.log('[步骤 2/6] 照片宽度:', photo.width, '高度:', photo.height);
 
       // 1. 预处理图片（压缩、调整大小）
-      console.log('预处理拍摄的图片...');
+      console.log('[步骤 3/6] 开始预处理图片...');
       let processedImageUri: string;
       try {
         processedImageUri = await processImageForUpload(photo.uri);
-        console.log('图片预处理完成:', processedImageUri);
+        console.log('[步骤 3/6] ✅ 图片预处理完成');
+        console.log('[步骤 3/6] 处理后 URI:', processedImageUri);
       } catch (preprocessError) {
-        console.error('图片预处理失败，使用原始图片:', preprocessError);
-        // 如果预处理失败，使用原始图片
+        console.error('[步骤 3/6] ⚠️ 图片预处理失败，使用原始图片:', preprocessError);
         processedImageUri = photo.uri;
       }
 
       // 2. 上传预处理后的图片到 Supabase Storage（使用临时文件名）
+      console.log('[步骤 4/6] 开始上传图片到 Supabase...');
       const tempFileName = `temp-${Date.now()}`;
-      const imageUrl = await uploadReceiptImageTemp(processedImageUri, tempFileName);
-      console.log('图片已上传，URL:', imageUrl);
+      let imageUrl: string;
+      try {
+        imageUrl = await uploadReceiptImageTemp(processedImageUri, tempFileName);
+        console.log('[步骤 4/6] ✅ 图片已上传');
+        console.log('[步骤 4/6] 图片 URL:', imageUrl);
+      } catch (uploadError) {
+        console.error('[步骤 4/6] ❌ 图片上传失败:', uploadError);
+        setIsProcessing(false);
+        const errorMsg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+        Alert.alert(
+          'Upload Failed',
+          `Failed to upload image: ${errorMsg}\n\nPlease check your network connection.`,
+          [{ text: 'OK' }]
+        );
+        return;
+      }
 
       // 3. 先创建一个待处理的小票记录（状态为 processing，正在后台处理）
-      // 使用当前日期和临时数据
+      console.log('[步骤 5/6] 创建小票记录...');
       const today = new Date().toISOString().split('T')[0];
-      const receiptId = await saveReceipt({
-        householdId: '', // 会在 saveReceipt 中自动获取
-        storeName: 'Processing...',
-        totalAmount: 0,
-        date: today,
-        status: 'processing', // 处理中
-        items: [],
-        imageUrl: imageUrl, // 临时图片 URL
-      });
-      console.log('小票记录已创建，ID:', receiptId);
+      let receiptId: string;
+      try {
+        receiptId = await saveReceipt({
+          householdId: '', // 会在 saveReceipt 中自动获取
+          storeName: 'Processing...',
+          totalAmount: 0,
+          date: today,
+          status: 'processing', // 处理中
+          items: [],
+          imageUrl: imageUrl, // 临时图片 URL
+        });
+        console.log('[步骤 5/6] ✅ 小票记录已创建');
+        console.log('[步骤 5/6] 小票 ID:', receiptId);
+      } catch (saveError) {
+        console.error('[步骤 5/6] ❌ 创建小票记录失败:', saveError);
+        setIsProcessing(false);
+        const errorMsg = saveError instanceof Error ? saveError.message : String(saveError);
+        Alert.alert(
+          'Save Failed',
+          `Failed to save receipt: ${errorMsg}\n\nPlease try again.`,
+          [{ text: 'OK' }]
+        );
+        return;
+      }
 
       setIsProcessing(false);
       setCapturedReceiptId(receiptId);
+      console.log('[步骤 6/6] ✅ 拍照流程完成，开始后台识别...');
 
       // 4. 在后台异步处理识别（不阻塞用户）
-      // 使用 Promise 但不 await，让它在后台运行
-      // 使用预处理后的图片 URI
       processReceiptInBackground(imageUrl, receiptId, processedImageUri)
         .then(() => {
           console.log('✅ 后台识别完成，receiptId:', receiptId);
@@ -118,24 +207,28 @@ export default function CameraScreen() {
         });
     } catch (error) {
       setIsProcessing(false);
-      console.error('Take picture error:', error);
+      console.error('=== ❌ 拍照流程异常 ===');
+      console.error('错误类型:', error instanceof Error ? error.constructor.name : typeof error);
+      console.error('错误信息:', error);
       
       // 更详细的错误信息
       let errorMessage = 'Failed to capture image';
+      let errorDetails = '';
+      
       if (error instanceof Error) {
-        errorMessage = error.message;
-        console.error('Error details:', {
-          name: error.name,
-          message: error.message,
-          stack: error.stack,
-        });
+        errorMessage = error.message || errorMessage;
+        errorDetails = `\n\nError: ${error.name}\nMessage: ${error.message}`;
+        if (error.stack) {
+          console.error('错误堆栈:', error.stack);
+        }
       } else {
-        console.error('Unknown error:', error);
+        console.error('未知错误类型:', error);
+        errorDetails = `\n\nError: ${String(error)}`;
       }
       
       Alert.alert(
         'Capture Failed', 
-        errorMessage + '\n\nPlease check:\n1. Camera permissions\n2. Storage permissions\n3. Try again',
+        errorMessage + errorDetails + '\n\nPlease check the console logs for more details.',
         [{ text: 'OK' }]
       );
     }

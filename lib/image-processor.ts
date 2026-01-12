@@ -16,14 +16,36 @@ const QUALITY = 0.85;
  */
 export async function processImageForUpload(imageUri: string): Promise<string> {
   try {
-    console.log('开始预处理图片:', imageUri);
+    console.log('[图片预处理] 开始预处理图片:', imageUri);
     
-    // 检查文件是否存在
-    const fileInfo = await FileSystem.getInfoAsync(imageUri);
-    if (!fileInfo.exists) {
-      throw new Error(`Image file does not exist: ${imageUri}`);
+    // 检查文件是否存在（添加重试机制，Android 上文件可能需要一点时间才能访问）
+    let fileInfo;
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        fileInfo = await FileSystem.getInfoAsync(imageUri);
+        if (fileInfo.exists) {
+          break;
+        }
+        retries--;
+        if (retries > 0) {
+          console.log(`[图片预处理] 文件不存在，等待后重试... (剩余 ${retries} 次)`);
+          await new Promise(resolve => setTimeout(resolve, 500)); // 等待 500ms
+        }
+      } catch (checkError) {
+        retries--;
+        if (retries === 0) {
+          throw checkError;
+        }
+        console.log(`[图片预处理] 检查文件失败，重试... (剩余 ${retries} 次)`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
     }
-    console.log('图片文件存在，大小:', fileInfo.size, 'bytes');
+    
+    if (!fileInfo || !fileInfo.exists) {
+      throw new Error(`Image file does not exist after retries: ${imageUri}`);
+    }
+    console.log('[图片预处理] 图片文件存在，大小:', fileInfo.size, 'bytes');
     
     // 1. 获取图片信息（先尝试不压缩，只获取信息）
     let imageInfo;
