@@ -18,18 +18,55 @@ export async function processImageForUpload(imageUri: string): Promise<string> {
   try {
     console.log('开始预处理图片:', imageUri);
     
-    // 1. 获取图片信息
-    const imageInfo = await ImageManipulator.manipulateAsync(
-      imageUri,
-      [],
-      { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
-    );
+    // 检查文件是否存在
+    const fileInfo = await FileSystem.getInfoAsync(imageUri);
+    if (!fileInfo.exists) {
+      throw new Error(`Image file does not exist: ${imageUri}`);
+    }
+    console.log('图片文件存在，大小:', fileInfo.size, 'bytes');
+    
+    // 1. 获取图片信息（先尝试不压缩，只获取信息）
+    let imageInfo;
+    try {
+      imageInfo = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [],
+        { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
+      );
+    } catch (manipulateError) {
+      console.error('获取图片信息失败:', manipulateError);
+      // 如果获取信息失败，尝试直接处理（不调整大小）
+      console.log('尝试直接压缩图片（不调整大小）...');
+      const directCompressed = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [],
+        {
+          compress: QUALITY,
+          format: ImageManipulator.SaveFormat.JPEG,
+        }
+      );
+      return directCompressed.uri;
+    }
+    
+    if (!imageInfo || !imageInfo.width || !imageInfo.height) {
+      console.warn('无法获取图片尺寸，尝试直接压缩...');
+      const directCompressed = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [],
+        {
+          compress: QUALITY,
+          format: ImageManipulator.SaveFormat.JPEG,
+        }
+      );
+      return directCompressed.uri;
+    }
     
     console.log('原始图片尺寸:', imageInfo.width, 'x', imageInfo.height);
     
     // 2. 计算目标尺寸（保持宽高比，限制最大尺寸）
     let targetWidth = imageInfo.width;
     let targetHeight = imageInfo.height;
+    let needsResize = false;
     
     if (targetWidth > MAX_IMAGE_DIMENSION || targetHeight > MAX_IMAGE_DIMENSION) {
       const ratio = Math.min(
@@ -38,20 +75,21 @@ export async function processImageForUpload(imageUri: string): Promise<string> {
       );
       targetWidth = Math.round(targetWidth * ratio);
       targetHeight = Math.round(targetHeight * ratio);
+      needsResize = true;
       console.log('调整后尺寸:', targetWidth, 'x', targetHeight);
     }
     
     // 3. 调整大小和压缩
     const manipulatedImage = await ImageManipulator.manipulateAsync(
       imageUri,
-      [
+      needsResize ? [
         {
           resize: {
             width: targetWidth,
             height: targetHeight,
           },
         },
-      ],
+      ] : [],
       {
         compress: QUALITY,
         format: ImageManipulator.SaveFormat.JPEG,
@@ -61,9 +99,9 @@ export async function processImageForUpload(imageUri: string): Promise<string> {
     console.log('图片处理完成:', manipulatedImage.uri);
     
     // 4. 检查文件大小，如果仍然太大，进一步压缩
-    const fileInfo = await FileSystem.getInfoAsync(manipulatedImage.uri);
-    if (fileInfo.exists && fileInfo.size && fileInfo.size > MAX_FILE_SIZE) {
-      console.log('文件仍然太大，进一步压缩:', fileInfo.size, 'bytes');
+    const manipulatedFileInfo = await FileSystem.getInfoAsync(manipulatedImage.uri);
+    if (manipulatedFileInfo.exists && manipulatedFileInfo.size && manipulatedFileInfo.size > MAX_FILE_SIZE) {
+      console.log('文件仍然太大，进一步压缩:', manipulatedFileInfo.size, 'bytes');
       
       // 逐步降低质量直到文件大小合适
       let currentQuality = QUALITY;
@@ -107,7 +145,24 @@ export async function processImageForUpload(imageUri: string): Promise<string> {
     return manipulatedImage.uri;
   } catch (error) {
     console.error('图片预处理失败:', error);
-    // 如果预处理失败，返回原始 URI（让上传函数处理错误）
+    console.error('错误详情:', {
+      message: error instanceof Error ? error.message : String(error),
+      uri: imageUri,
+    });
+    
+    // 如果预处理失败，尝试检查文件是否存在
+    try {
+      const fileInfo = await FileSystem.getInfoAsync(imageUri);
+      if (!fileInfo.exists) {
+        throw new Error(`Image file does not exist: ${imageUri}`);
+      }
+      console.log('原始图片文件存在，直接使用原始图片');
+    } catch (checkError) {
+      console.error('检查文件存在性失败:', checkError);
+      throw new Error(`Failed to process image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+    
+    // 如果预处理失败但文件存在，返回原始 URI（让上传函数处理）
     return imageUri;
   }
 }

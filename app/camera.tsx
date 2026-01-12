@@ -46,24 +46,42 @@ export default function CameraScreen() {
   }
 
   const takePicture = async () => {
-    if (!cameraRef.current) return;
+    if (!cameraRef.current) {
+      Alert.alert('Error', 'Camera not ready. Please try again.');
+      return;
+    }
 
     try {
       setIsProcessing(true);
+      
+      // 拍摄照片
+      console.log('开始拍摄照片...');
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.9, // 先以较高质量拍摄
+        quality: 0.6, // 先以较高质量拍摄
         base64: false,
+        skipProcessing: false, // 确保进行图片处理
       });
 
-      if (!photo) {
+      if (!photo || !photo.uri) {
         setIsProcessing(false);
+        Alert.alert('Error', 'Failed to capture image. Please try again.');
+        console.error('Photo capture failed: photo is null or uri is missing');
         return;
       }
 
+      console.log('照片拍摄成功，URI:', photo.uri);
+
       // 1. 预处理图片（压缩、调整大小）
       console.log('预处理拍摄的图片...');
-      const processedImageUri = await processImageForUpload(photo.uri);
-      console.log('图片预处理完成:', processedImageUri);
+      let processedImageUri: string;
+      try {
+        processedImageUri = await processImageForUpload(photo.uri);
+        console.log('图片预处理完成:', processedImageUri);
+      } catch (preprocessError) {
+        console.error('图片预处理失败，使用原始图片:', preprocessError);
+        // 如果预处理失败，使用原始图片
+        processedImageUri = photo.uri;
+      }
 
       // 2. 上传预处理后的图片到 Supabase Storage（使用临时文件名）
       const tempFileName = `temp-${Date.now()}`;
@@ -101,10 +119,23 @@ export default function CameraScreen() {
     } catch (error) {
       setIsProcessing(false);
       console.error('Take picture error:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Error processing receipt';
+      
+      // 更详细的错误信息
+      let errorMessage = 'Failed to capture image';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        console.error('Error details:', {
+          name: error.name,
+          message: error.message,
+          stack: error.stack,
+        });
+      } else {
+        console.error('Unknown error:', error);
+      }
+      
       Alert.alert(
-        'Recognition Failed', 
-        errorMessage + '\n\nPlease check:\n1. Gemini API Key configuration\n2. Network connection\n3. API quota',
+        'Capture Failed', 
+        errorMessage + '\n\nPlease check:\n1. Camera permissions\n2. Storage permissions\n3. Try again',
         [{ text: 'OK' }]
       );
     }
