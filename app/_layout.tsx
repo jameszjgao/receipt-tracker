@@ -82,6 +82,7 @@ export default function RootLayout() {
             title: 'Household Members',
             headerBackTitle: 'Back',
             headerBackButtonVisible: true,
+            presentation: 'card', // 确保使用 card 模式，避免导航问题
           }} 
         />
         <Stack.Screen 

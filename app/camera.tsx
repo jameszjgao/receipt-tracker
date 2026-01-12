@@ -9,6 +9,7 @@ import { saveReceipt } from '@/lib/database';
 import { processReceiptInBackground } from '@/lib/receipt-processor';
 import { isAuthenticated } from '@/lib/auth';
 import { useEffect } from 'react';
+import { processImageForUpload } from '@/lib/image-processor';
 
 export default function CameraScreen() {
   const [facing, setFacing] = useState<CameraType>('back');
@@ -50,7 +51,7 @@ export default function CameraScreen() {
     try {
       setIsProcessing(true);
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
+        quality: 0.9, // 先以较高质量拍摄
         base64: false,
       });
 
@@ -59,12 +60,17 @@ export default function CameraScreen() {
         return;
       }
 
-      // 1. 先上传图片到 Supabase Storage（使用临时文件名）
+      // 1. 预处理图片（压缩、调整大小）
+      console.log('预处理拍摄的图片...');
+      const processedImageUri = await processImageForUpload(photo.uri);
+      console.log('图片预处理完成:', processedImageUri);
+
+      // 2. 上传预处理后的图片到 Supabase Storage（使用临时文件名）
       const tempFileName = `temp-${Date.now()}`;
-      const imageUrl = await uploadReceiptImageTemp(photo.uri, tempFileName);
+      const imageUrl = await uploadReceiptImageTemp(processedImageUri, tempFileName);
       console.log('图片已上传，URL:', imageUrl);
 
-      // 2. 先创建一个待处理的小票记录（状态为 processing，正在后台处理）
+      // 3. 先创建一个待处理的小票记录（状态为 processing，正在后台处理）
       // 使用当前日期和临时数据
       const today = new Date().toISOString().split('T')[0];
       const receiptId = await saveReceipt({
@@ -83,7 +89,8 @@ export default function CameraScreen() {
 
       // 4. 在后台异步处理识别（不阻塞用户）
       // 使用 Promise 但不 await，让它在后台运行
-      processReceiptInBackground(imageUrl, receiptId, photo.uri)
+      // 使用预处理后的图片 URI
+      processReceiptInBackground(imageUrl, receiptId, processedImageUri)
         .then(() => {
           console.log('✅ 后台识别完成，receiptId:', receiptId);
         })
@@ -109,19 +116,24 @@ export default function CameraScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.8,
+        aspect: [1, 2], // 1:2 比例，更符合小票的竖长形状（高度是宽度的2倍）
+        quality: 0.9, // 先以较高质量选择
       });
 
       if (!result.canceled && result.assets[0]) {
         const imageUri = result.assets[0].uri;
         
-        // 1. 先上传图片到 Supabase Storage（使用临时文件名）
+        // 1. 预处理图片（压缩、调整大小）
+        console.log('预处理选择的图片...');
+        const processedImageUri = await processImageForUpload(imageUri);
+        console.log('图片预处理完成:', processedImageUri);
+        
+        // 2. 上传预处理后的图片到 Supabase Storage（使用临时文件名）
         const tempFileName = `temp-${Date.now()}`;
-        const imageUrl = await uploadReceiptImageTemp(imageUri, tempFileName);
+        const imageUrl = await uploadReceiptImageTemp(processedImageUri, tempFileName);
         console.log('图片已上传，URL:', imageUrl);
 
-        // 2. 先创建一个待处理的小票记录（状态为 processing，正在后台处理）
+        // 3. 先创建一个待处理的小票记录（状态为 processing，正在后台处理）
         const today = new Date().toISOString().split('T')[0];
         const receiptId = await saveReceipt({
           householdId: '', // 会在 saveReceipt 中自动获取
@@ -138,7 +150,8 @@ export default function CameraScreen() {
         setCapturedReceiptId(receiptId);
 
         // 4. 在后台异步处理识别（不阻塞用户）
-        processReceiptInBackground(imageUrl, receiptId, imageUri)
+        // 使用预处理后的图片 URI
+        processReceiptInBackground(imageUrl, receiptId, processedImageUri)
           .then(() => {
             console.log('✅ 后台识别完成，receiptId:', receiptId);
           })
