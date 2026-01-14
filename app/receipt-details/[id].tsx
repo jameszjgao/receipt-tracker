@@ -11,10 +11,12 @@ import {
   Image,
   ActivityIndicator,
   Modal,
+  Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { getReceiptById, updateReceipt, updateReceiptItem } from '@/lib/database';
 import { uploadReceiptImage } from '@/lib/supabase';
 import { getCategories } from '@/lib/categories';
@@ -38,6 +40,10 @@ export default function ReceiptDetailsScreen() {
   const [showCategoryPicker, setShowCategoryPicker] = useState<number | null>(null);
   const [showPurposePicker, setShowPurposePicker] = useState<number | null>(null);
   const [showPaymentAccountPicker, setShowPaymentAccountPicker] = useState<boolean>(false);
+  const [showCurrencyPicker, setShowCurrencyPicker] = useState<boolean>(false);
+  const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
+  const [taxInputText, setTaxInputText] = useState<string>('');
+  const [priceInputTexts, setPriceInputTexts] = useState<{ [index: number]: string }>({});
 
   useEffect(() => {
     loadReceipt();
@@ -93,6 +99,14 @@ export default function ReceiptDetailsScreen() {
       // 如果是新创建的小票，自动进入编辑模式
       if (isNew === 'true') {
         setEditing(true);
+        // 初始化输入文本状态
+        const currentReceiptForInit = editedReceipt || receipt;
+        setTaxInputText((currentReceiptForInit?.tax || 0).toString());
+        const priceTexts: { [index: number]: string } = {};
+        (currentReceiptForInit?.items || []).forEach((item, index) => {
+          priceTexts[index] = item.price.toString();
+        });
+        setPriceInputTexts(priceTexts);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to load receipt details');
@@ -133,6 +147,11 @@ export default function ReceiptDetailsScreen() {
       console.error(error);
     }
   };
+
+  const commonCurrencies = useMemo(
+    () => ['USD', 'CAD', 'EUR', 'GBP', 'JPY', 'HKD', 'AUD', 'CNY'],
+    []
+  );
 
   // 计算商品明细金额总和
   const calculateItemsSum = useCallback((items: ReceiptItem[]) => {
@@ -181,6 +200,42 @@ export default function ReceiptDetailsScreen() {
       ...editedReceipt,
       tax: tax,
       totalAmount: newTotalAmount,
+    });
+  };
+
+  // 处理日期变更
+  const handleDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+      if (event.type === 'dismissed') {
+        return;
+      }
+    }
+    if (selectedDate && editedReceipt) {
+      const dateString = selectedDate.toISOString().split('T')[0];
+      setEditedReceipt({
+        ...editedReceipt,
+        date: dateString,
+      });
+    }
+  };
+
+  // 处理币种变更
+  const handleCurrencyChange = (currency: string) => {
+    if (!editedReceipt) return;
+    
+    setEditedReceipt({
+      ...editedReceipt,
+      currency: currency || undefined,
+    });
+  };
+
+  // 处理商家名称变更
+  const handleStoreNameChange = (storeName: string) => {
+    if (!editedReceipt) return;
+    setEditedReceipt({
+      ...editedReceipt,
+      storeName: storeName,
     });
   };
 
@@ -437,25 +492,54 @@ export default function ReceiptDetailsScreen() {
           <View style={styles.summaryContent}>
             <View style={styles.summaryContentTop}>
               <View style={styles.summaryContentMain}>
-                <Text style={styles.storeName} numberOfLines={1}>
-                  {currentReceipt.storeName}
-                </Text>
+                {editing ? (
+                  <TextInput
+                    style={styles.storeNameInput}
+                    value={editedReceipt?.storeName || ''}
+                    onChangeText={handleStoreNameChange}
+                    placeholder="Store name"
+                    maxLength={100}
+                  />
+                ) : (
+                  <Text style={styles.storeName} numberOfLines={1}>
+                    {currentReceipt.storeName}
+                  </Text>
+                )}
                 <View style={styles.amountRow}>
                   <View style={styles.amountContainer}>
-                    {currentReceipt.currency && (
-                      <Text style={styles.currencyLabel}>{currentReceipt.currency}</Text>
-                    )}
+                    <View style={styles.currencyContainer}>
+                      {editing ? (
+                        <TouchableOpacity
+                          style={styles.currencyPickerTouchable}
+                          onPress={() => setShowCurrencyPicker(true)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.currencyLabel}>
+                            {editedReceipt?.currency || 'Currency'}
+                          </Text>
+                        </TouchableOpacity>
+                      ) : (
+                        currentReceipt.currency ? (
+                          <View style={styles.currencyPickerReadonly}>
+                            <Text style={styles.currencyLabel}>
+                              {currentReceipt.currency}
+                            </Text>
+                          </View>
+                        ) : null
+                      )}
+                    </View>
                     {editing ? (
                       <Text style={styles.totalAmount}>
                         {(() => {
                           const itemsSum = calculateItemsSum(editedReceipt?.items || []);
                           const tax = editedReceipt?.tax || 0;
-                          return (itemsSum + tax).toFixed(2);
+                          const total = itemsSum + tax;
+                          return (total < 0 ? '-' : '') + Math.abs(total).toFixed(2);
                         })()}
                       </Text>
                     ) : (
                       <Text style={styles.totalAmount}>
-                        {currentReceipt.totalAmount.toFixed(2)}
+                        {(currentReceipt.totalAmount < 0 ? '-' : '') + Math.abs(currentReceipt.totalAmount).toFixed(2)}
                       </Text>
                     )}
                     {editing ? (
@@ -463,25 +547,74 @@ export default function ReceiptDetailsScreen() {
                         <Text style={styles.taxLabel}>Tax: </Text>
                         <TextInput
                           style={styles.taxInput}
-                          value={(editedReceipt?.tax || 0).toString()}
+                          value={taxInputText}
                           onChangeText={(text) => {
-                            const tax = parseFloat(text) || 0;
-                            handleTaxChange(tax);
+                            // 验证输入：只允许数字、负号和小数点
+                            const validPattern = /^-?\d*\.?\d*$/;
+                            if (text === '' || text === '-' || validPattern.test(text)) {
+                              setTaxInputText(text);
+                              // 如果文本是有效的数字，更新 tax 值
+                              if (text !== '' && text !== '-' && text !== '.') {
+                                const tax = parseFloat(text);
+                                if (!isNaN(tax)) {
+                                  handleTaxChange(tax);
+                                }
+                              } else if (text === '' || text === '-') {
+                                handleTaxChange(text === '' ? 0 : 0);
+                              }
+                            }
                           }}
-                          keyboardType="numeric"
+                          onBlur={() => {
+                            // 失去焦点时，确保值是有效的数字
+                            const tax = parseFloat(taxInputText);
+                            if (isNaN(tax)) {
+                              setTaxInputText('0');
+                              handleTaxChange(0);
+                            } else {
+                              setTaxInputText(tax.toString());
+                              handleTaxChange(tax);
+                            }
+                          }}
+                          keyboardType="numbers-and-punctuation"
                           placeholder="0.00"
                         />
                       </View>
                     ) : (
-                      currentReceipt.tax !== undefined && currentReceipt.tax > 0 && (
-                        <Text style={styles.taxText}>
-                          Tax: {currentReceipt.tax.toFixed(2)}
+                      <View style={styles.taxText}>
+                        <Text style={styles.taxLabel}>Tax:</Text>
+                        <Text style={styles.taxValueText}>
+                          {(() => {
+                            const tax = currentReceipt.tax ?? 0;
+                            return (tax < 0 ? '-' : '') + Math.abs(tax).toFixed(2);
+                          })()}
                         </Text>
-                      )
+                      </View>
                     )}
                   </View>
                 </View>
-                <Text style={styles.date}>{formatDate(currentReceipt.date)}</Text>
+                <View style={styles.dateContainer}>
+                  {editing ? (
+                    <TouchableOpacity
+                      style={styles.dateTouchable}
+                      onPress={() => setShowDatePicker(true)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.dateTag}>
+                        <Text style={styles.dateText}>
+                          {editedReceipt?.date ? formatDate(editedReceipt.date) : '选择日期'}
+                        </Text>
+                        <Ionicons
+                          name="chevron-down"
+                          size={14}
+                          color="#6C5CE7"
+                          style={styles.tagIcon}
+                        />
+                      </View>
+                    </TouchableOpacity>
+                  ) : (
+                    <Text style={styles.date}>{formatDate(currentReceipt.date)}</Text>
+                  )}
+                </View>
               </View>
               {currentReceipt.createdAt && (
                 <View style={styles.submittedInfo}>
@@ -512,6 +645,14 @@ export default function ReceiptDetailsScreen() {
                 if (!editing) {
                   setEditedReceipt({ ...currentReceipt });
                   setEditing(true);
+        // 初始化输入文本状态
+        const currentReceiptForInit = editedReceipt || receipt;
+        setTaxInputText((currentReceiptForInit?.tax || 0).toString());
+        const priceTexts: { [index: number]: string } = {};
+        (currentReceiptForInit?.items || []).forEach((item, index) => {
+          priceTexts[index] = item.price.toString();
+        });
+        setPriceInputTexts(priceTexts);
                 }
                 
                 // 直接设置状态，不使用 setTimeout
@@ -580,15 +721,43 @@ export default function ReceiptDetailsScreen() {
                 {editing ? (
                   <TextInput
                     style={styles.priceInput}
-                    value={item.price.toString()}
-                    onChangeText={(text) =>
-                      handleItemChange(index, 'price', parseFloat(text) || 0)
-                    }
-                    keyboardType="numeric"
+                    value={priceInputTexts[index] !== undefined ? priceInputTexts[index] : item.price.toString()}
+                    onChangeText={(text) => {
+                      // 验证输入：只允许数字、负号和小数点
+                      const validPattern = /^-?\d*\.?\d*$/;
+                      if (text === '' || text === '-' || validPattern.test(text)) {
+                        setPriceInputTexts(prev => ({ ...prev, [index]: text }));
+                        // 如果文本是有效的数字，更新 price 值
+                        if (text !== '' && text !== '-' && text !== '.') {
+                          const price = parseFloat(text);
+                          if (!isNaN(price)) {
+                            handleItemChange(index, 'price', price);
+                          }
+                        } else if (text === '' || text === '-') {
+                          handleItemChange(index, 'price', text === '' ? 0 : 0);
+                        }
+                      }
+                    }}
+                    onBlur={() => {
+                      // 失去焦点时，确保值是有效的数字
+                      const text = priceInputTexts[index] !== undefined ? priceInputTexts[index] : item.price.toString();
+                      const price = parseFloat(text);
+                      if (isNaN(price)) {
+                        setPriceInputTexts(prev => ({ ...prev, [index]: '0' }));
+                        handleItemChange(index, 'price', 0);
+                      } else {
+                        setPriceInputTexts(prev => ({ ...prev, [index]: price.toString() }));
+                        handleItemChange(index, 'price', price);
+                      }
+                    }}
+                    keyboardType="numbers-and-punctuation"
                     placeholder="Price"
                   />
                 ) : (
-                  <Text style={styles.itemPrice}>${item.price.toFixed(2)}</Text>
+                  <Text style={styles.itemPrice}>
+                    {item.price < 0 ? '-' : ''}
+                    {Math.abs(item.price).toFixed(2)}
+                  </Text>
                 )}
               </View>
 
@@ -681,13 +850,15 @@ export default function ReceiptDetailsScreen() {
           ))}
 
           {editing && (
-            <TouchableOpacity
-              style={styles.addItemButton}
-              onPress={handleAddItem}
-            >
-              <Ionicons name="add-circle-outline" size={24} color="#6C5CE7" />
-              <Text style={styles.addItemText}>Add Item</Text>
-            </TouchableOpacity>
+            <View style={styles.addItemButtonContainer}>
+              <TouchableOpacity
+                style={styles.addItemButton}
+                onPress={handleAddItem}
+              >
+                <Ionicons name="add-circle-outline" size={24} color="#6C5CE7" />
+                <Text style={styles.addItemText}>Add Item</Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
       </ScrollView>
@@ -718,6 +889,14 @@ export default function ReceiptDetailsScreen() {
           onPress={() => {
             setEditedReceipt({ ...currentReceipt });
             setEditing(true);
+        // 初始化输入文本状态
+        const currentReceiptForInit = editedReceipt || receipt;
+        setTaxInputText((currentReceiptForInit?.tax || 0).toString());
+        const priceTexts: { [index: number]: string } = {};
+        (currentReceiptForInit?.items || []).forEach((item, index) => {
+          priceTexts[index] = item.price.toString();
+        });
+        setPriceInputTexts(priceTexts);
           }}
         >
           <Ionicons name="create" size={32} color="#fff" />
@@ -958,6 +1137,14 @@ export default function ReceiptDetailsScreen() {
                         paymentAccountId: undefined,
                       });
                       setEditing(true);
+        // 初始化输入文本状态
+        const currentReceiptForInit = editedReceipt || receipt;
+        setTaxInputText((currentReceiptForInit?.tax || 0).toString());
+        const priceTexts: { [index: number]: string } = {};
+        (currentReceiptForInit?.items || []).forEach((item, index) => {
+          priceTexts[index] = item.price.toString();
+        });
+        setPriceInputTexts(priceTexts);
                     }
                   }
                   setShowPaymentAccountPicker(false);
@@ -1007,6 +1194,14 @@ export default function ReceiptDetailsScreen() {
                           paymentAccountId: account.id,
                         });
                         setEditing(true);
+        // 初始化输入文本状态
+        const currentReceiptForInit = editedReceipt || receipt;
+        setTaxInputText((currentReceiptForInit?.tax || 0).toString());
+        const priceTexts: { [index: number]: string } = {};
+        (currentReceiptForInit?.items || []).forEach((item, index) => {
+          priceTexts[index] = item.price.toString();
+        });
+        setPriceInputTexts(priceTexts);
                       }
                       setShowPaymentAccountPicker(false);
                     }}
@@ -1035,6 +1230,139 @@ export default function ReceiptDetailsScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* 币种选择器 */}
+      <Modal
+        visible={showCurrencyPicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowCurrencyPicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.pickerOverlay}
+          activeOpacity={1}
+          onPress={() => setShowCurrencyPicker(false)}
+        >
+          <View style={styles.pickerBottomSheet} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHandle} />
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Select Currency</Text>
+              <TouchableOpacity
+                onPress={() => setShowCurrencyPicker(false)}
+                style={styles.pickerCloseButton}
+              >
+                <Text style={styles.pickerCloseText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.pickerScrollView} showsVerticalScrollIndicator={false}>
+              {commonCurrencies.map(code => {
+                const currentCurrency = editedReceipt?.currency || currentReceipt.currency;
+                const isSelected = currentCurrency === code;
+                return (
+                  <TouchableOpacity
+                    key={code}
+                    style={[
+                      styles.pickerOption,
+                      isSelected && styles.pickerOptionSelected,
+                    ]}
+                    onPress={() => {
+                      if (editedReceipt) {
+                        handleCurrencyChange(code);
+                      }
+                      setShowCurrencyPicker(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.pickerOptionText,
+                        isSelected && styles.pickerOptionTextSelected,
+                      ]}
+                    >
+                      {code}
+                    </Text>
+                    {isSelected && (
+                      <Ionicons name="checkmark" size={20} color="#6C5CE7" />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+              
+              {/* Not set 放在最后 */}
+              <TouchableOpacity
+                style={[
+                  styles.pickerOption,
+                  !(editedReceipt?.currency || currentReceipt.currency) && styles.pickerOptionSelected,
+                ]}
+                onPress={() => {
+                  if (editedReceipt) {
+                    handleCurrencyChange('');
+                  }
+                  setShowCurrencyPicker(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.pickerOptionText,
+                    !(editedReceipt?.currency || currentReceipt.currency) && styles.pickerOptionTextSelected,
+                  ]}
+                >
+                  Not set
+                </Text>
+                {!(editedReceipt?.currency || currentReceipt.currency) && (
+                  <Ionicons name="checkmark" size={20} color="#6C5CE7" />
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* 日期选择器 */}
+      {showDatePicker && (
+        <>
+          {Platform.OS === 'ios' ? (
+            <Modal
+              visible={showDatePicker}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setShowDatePicker(false)}
+            >
+              <TouchableOpacity
+                style={styles.pickerOverlay}
+                activeOpacity={1}
+                onPress={() => setShowDatePicker(false)}
+              >
+                <View style={styles.pickerBottomSheet} onStartShouldSetResponder={() => true}>
+                  <View style={styles.pickerHandle} />
+                  <View style={styles.pickerHeader}>
+                    <Text style={styles.pickerTitle}>选择日期</Text>
+                    <TouchableOpacity
+                      onPress={() => setShowDatePicker(false)}
+                      style={styles.pickerCloseButton}
+                    >
+                      <Text style={styles.pickerCloseText}>完成</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <DateTimePicker
+                    value={editedReceipt?.date ? new Date(editedReceipt.date) : new Date()}
+                    mode="date"
+                    display="spinner"
+                    onChange={handleDateChange}
+                    style={styles.datePickerIOS}
+                  />
+                </View>
+              </TouchableOpacity>
+            </Modal>
+          ) : (
+            <DateTimePicker
+              value={editedReceipt?.date ? new Date(editedReceipt.date) : new Date()}
+              mode="date"
+              display="default"
+              onChange={handleDateChange}
+            />
+          )}
+        </>
+      )}
     </View>
   );
 }
@@ -1042,7 +1370,8 @@ export default function ReceiptDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    // 略微加深灰度，让内容白色卡片更突出
+    backgroundColor: '#ECEFF1',
   },
   loadingContainer: {
     flex: 1,
@@ -1109,11 +1438,34 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#2D3436',
     lineHeight: 22,
+    height: 22, // 固定高度，作为三行高度计算基准
+    // 略微上移并压缩与下方金额行的间距
+    marginBottom: 2,
+    // 加一个透明下边框，让编辑/非编辑模式整体高度一致，避免文字在切换时上下跳动
+    borderBottomWidth: 1,
+    borderBottomColor: 'transparent',
+    paddingVertical: 0,
+  },
+  storeNameInput: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#2D3436',
+    lineHeight: 22,
+    borderBottomWidth: 1,
+    // 使用与套框相同的主题色和线宽
+    borderBottomColor: '#6C5CE7',
+    height: 22, // 与非编辑态严格相同的高度
+    paddingVertical: 0,
+    marginBottom: 2,
+    // 微调渲染位置，抵消 Text 与 TextInput 基线差异导致的下移约 1–2px
+    transform: [{ translateY: -1 }],
   },
   amountRow: {
     flexDirection: 'row',
     justifyContent: 'flex-start',
     alignItems: 'baseline',
+    // 与上方商家名称、下方日期形成更均衡的三行行距
+    marginTop: 2,
   },
   amountContainer: {
     flexDirection: 'row',
@@ -1124,9 +1476,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#636E72',
-    marginRight: 4,
-    lineHeight: 20,
+    lineHeight: 18,
   },
+  // 保留占位，若后续需要针对只读态额外调整可继续使用
+  currencyLabelReadonly: {},
   totalAmount: {
     fontSize: 24,
     fontWeight: 'bold',
@@ -1135,10 +1488,12 @@ const styles = StyleSheet.create({
     lineHeight: 28,
   },
   taxText: {
-    fontSize: 11,
-    color: '#636E72',
-    fontWeight: '500',
-    lineHeight: 16,
+    // 阅读模式下 Tax 行的容器
+    flexDirection: 'row',
+    alignItems: 'center',
+    // 与编辑态 taxInputContainer.marginLeft 保持一致，确保与总金额的水平间距固定
+    marginLeft: 8,
+    height: 20, // 与编辑态 taxInput.height 一致，避免高度抖动
   },
   taxInputContainer: {
     flexDirection: 'row',
@@ -1151,6 +1506,14 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     lineHeight: 16,
   },
+  taxValueText: {
+    fontSize: 11,
+    color: '#636E72',
+    fontWeight: '500',
+    lineHeight: 16,
+    // 税额数字向右略移，使“Tax:”与数字之间保持固定间距
+    marginLeft: 8,
+  },
   taxInput: {
     fontSize: 11,
     color: '#636E72',
@@ -1158,18 +1521,107 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#6C5CE7',
     borderRadius: 4,
-    paddingVertical: 2,
+    // 高度与币种套框保持一致，方便上下对齐
+    paddingVertical: 1,
+    height: 20,
     paddingHorizontal: 4,
     minWidth: 50,
-    textAlign: 'right',
+    // 文本左对齐，避免在数值变化时产生左右跳动
+    textAlign: 'left',
     lineHeight: 16,
+    // 再上移 2 像素（总计约 4px），只影响文字位置，不改变高度
+    transform: [{ translateY: -3 }],
   },
   date: {
-    fontSize: 15,
+    fontSize: 14, // 与币种相同
+    fontWeight: '600', // 与币种相同粗细
     color: '#636E72',
-    lineHeight: 16,
-    marginTop: 8,
+    // 对齐编辑态的 dateText 与 dateTag 中的文字位置（略上移、略右移）
+    lineHeight: 18,
+    marginTop: 2,
+    // 略小于 dateTag 的 paddingHorizontal，抵消渲染差异
+    marginLeft: 11,
     marginBottom: 0,
+  },
+  currencyContainer: {
+    // 与日期左侧对齐：币种框左边缘应与日期框左边缘对齐
+    marginLeft: 0,
+    marginRight: 4,
+    // 不再强制 minWidth，让左右留白只由 padding 决定，避免右侧空白过大
+    minHeight: 20,
+  },
+  currencyPickerTouchable: {
+    // 采用与日期编辑态相同的圆角框风格（去除下拉箭头后适当缩减左右留白）
+    flexDirection: 'row',
+    alignItems: 'center',
+    // 左右内边距保持完全一致，保证视觉对称
+    paddingLeft: 8,
+    paddingRight: 8,
+    paddingVertical: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#6C5CE7',
+    backgroundColor: '#F8F9FA',
+    height: 20,
+  },
+  currencyPickerReadonly: {
+    // 与编辑态的 currencyPickerTouchable 完全同宽同内边距，只是边框透明，避免左右抖动
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 8,
+    paddingRight: 8,
+    paddingVertical: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    height: 20,
+  },
+  currencyInput: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#636E72',
+    borderWidth: 1,
+    borderColor: '#6C5CE7',
+    borderRadius: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    minWidth: 60,
+    lineHeight: 20,
+    height: 24, // 固定高度，避免布局跳动
+  },
+  dateContainer: {
+    marginTop: 8,
+    // 固定高度，保证编辑/非编辑模式下头部卡片总高度一致
+    height: 24,
+  },
+  dateTouchable: {
+    // 只作为点击区域容器，具体视觉样式由 dateTag 控制
+    alignSelf: 'flex-start',
+  },
+  dateText: {
+    fontSize: 14, // 与币种相同
+    color: '#636E72',
+    lineHeight: 18,
+    fontWeight: '600', // 与币种相同加粗程度
+  },
+  dateTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#6C5CE7',
+    backgroundColor: '#F8F9FA',
+    height: 20,
+  },
+  dateIcon: {
+    marginLeft: 6,
+  },
+  datePickerIOS: {
+    width: '100%',
+    height: 200,
   },
   paymentCard: {
     backgroundColor: '#fff',
@@ -1190,11 +1642,14 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   cardValue: {
-    fontSize: 15,
+    // 与编辑模式下的 paymentAccountText 保持一致的文字样式
+    fontSize: 14,
     color: '#2D3436',
     fontWeight: '500',
     paddingVertical: 10, // 增加上下内间距，增加非编辑状态的高度
     lineHeight: 20, // 确保行高一致
+    // 阅读模式下账户名整体向左移动约 20 像素（通过增加右侧留白实现，不改变卡片高度）
+    marginRight: 37,
   },
   paymentAccountTouchable: {
     flex: 1,
@@ -1205,7 +1660,8 @@ const styles = StyleSheet.create({
   paymentAccountTag: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F0F0F0',
+    // 与币种、税、日期等编辑套框统一底色
+    backgroundColor: '#F8F9FA',
     paddingHorizontal: 12,
     paddingVertical: 4, // 减小上下内间距，与非编辑状态的 cardValue 保持一致
     borderRadius: 16,
@@ -1285,19 +1741,31 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#2D3436',
     marginRight: 6,
-    paddingVertical: 3, // 与 itemNameInput 保持一致的高度
-    lineHeight: 20, // 确保行高一致
+    // 固定高度和行高，作为商品名称行的基准
+    lineHeight: 20,
+    height: 20,
+    // 与编辑态保持相同的下划线占位，避免切换时文字上下抖动
+    borderBottomWidth: 1,
+    borderBottomColor: 'transparent',
+    paddingVertical: 0,
+    // 与编辑态保持相同的 Y 偏移，彻底消除切换时的相对位移
+    transform: [{ translateY: -2 }],
   },
   itemNameInput: {
     flex: 1,
     fontSize: 15,
     fontWeight: '600',
     color: '#2D3436',
+    // 下划线输入样式，但高度和 itemName 完全一致
     borderBottomWidth: 1,
-    borderBottomColor: '#E9ECEF',
-    paddingVertical: 2,
+    // 使用与套框相同的主题色和线宽
+    borderBottomColor: '#6C5CE7',
+    lineHeight: 20,
+    height: 20,
+    paddingVertical: 0,
     marginRight: 6,
-    lineHeight: 20, // 确保行高一致
+    // 再向上微移 1px，进一步抵消进入编辑模式时的肉眼下移
+    transform: [{ translateY: -4 }],
   },
   itemHeader: {
     flexDirection: 'row',
@@ -1409,12 +1877,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: '#6C5CE7',
-    borderStyle: 'dashed',
+    // 采用与其他编辑套框统一的底色，但边框弱化
+    backgroundColor: '#F8F9FA',
+    // 减小圆角，以表意“新的一行 item”
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#CED4DA',
+    // 宽度与 itemCard 一致：在父容器内占满横向空间
+    alignSelf: 'stretch',
+  },
+  addItemButtonContainer: {
+    // 将 Add Item 按钮放置在灰色背景上，与 item 卡片底色区分开
+    paddingTop: 12,
+    paddingBottom: 4,
+    backgroundColor: '#ECEFF1',
+    alignItems: 'center',
   },
   addItemText: {
     marginLeft: 8,
@@ -1427,10 +1906,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#fff',
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#E9ECEF',
+    // 不再使用遮挡式背景，只保留按钮的浮动布局
+    backgroundColor: 'transparent',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    paddingTop: 8,
+    borderTopWidth: 0,
     flexDirection: 'row',
     gap: 12,
   },
@@ -1443,27 +1924,40 @@ const styles = StyleSheet.create({
     backgroundColor: '#6C5CE7',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#6C5CE7',
+    // 统一浮动按钮阴影样式
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
+    elevation: 6,
   },
   editFab: {
     bottom: 20,
     backgroundColor: '#95A5A6',
-    shadowColor: '#95A5A6',
-    shadowOpacity: 0.2,
+    // 继承 fab 的阴影，不再单独弱化
   },
   confirmFab: {
     bottom: 100,
+    // 使用与 fab / editFab 相同的阴影层级
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
+    elevation: 6,
   },
   cancelButton: {
     flex: 1,
-    backgroundColor: '#E9ECEF',
+    // 略深于页面背景色，保证与背景区别但不喧宾夺主
+    backgroundColor: '#DDE2E6',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
+    // 与确认按钮保持一致的阴影层级，以形成一组操作
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
+    elevation: 6,
   },
   cancelButtonText: {
     fontSize: 16,
@@ -1478,6 +1972,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    // 与取消按钮相同的阴影层级，强调为同一层次的操作按钮
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
+    elevation: 6,
   },
   confirmButtonText: {
     marginLeft: 8,
@@ -1587,6 +2087,15 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   pickerOptionTextSelected: {
+    color: '#6C5CE7',
+    fontWeight: '600',
+  },
+  pickerCloseButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  pickerCloseText: {
+    fontSize: 16,
     color: '#6C5CE7',
     fontWeight: '600',
   },

@@ -124,7 +124,7 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
   const prompt = `You are a financial expert. Please analyze the receipt in this image and extract:
 1. Store name (storeName)
 2. Date (date, format: YYYY-MM-DD)
-3. Total amount (totalAmount, numeric type)
+3. Total amount (totalAmount, numeric type, can be negative for refunds)
 4. Currency (currency, such as: CNY, USD, etc.)
 5. Payment account (paymentAccountName, if available, MUST include key distinguishing information such as:
    - Card number suffix (last 4 digits, e.g., ****1234, *1234, Last 4: 1234)
@@ -135,7 +135,7 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
    - Name (name)
    - Category (categoryName): Automatically select one from [${categoryList}] based on item content
    - Purpose (purpose): Select one from [${purposeList}]. DEFAULT to "Home" unless there is clear evidence indicating otherwise (e.g., explicit business expense mention, gift purchase indication). Most receipts are personal/family use, so use "Home" as the default.
-   - Unit price (price, numeric type)
+   - Unit price (price, numeric type, can be negative for refunds)
 8. Image quality assessment (imageQuality):
    - clarity: Image clarity score (0.0-1.0, where 1.0 is perfectly clear)
    - completeness: Image completeness score (0.0-1.0, where 1.0 means all receipt content is visible)
@@ -545,7 +545,7 @@ REQUIRED FIELDS (extract completely, do not omit any mentioned information):
      * name: string, complete item name or description
      * categoryName: string, MUST be one from this list: [${categoryList}]
      * purpose: string, MUST be one from this list: [${purposeList}]. Choose "Home" for personal/family use, "Business" for work/business expenses, "Gifts" for gifts given to others
-     * price: number, unit price of the item (must be positive)
+     * price: number, unit price of the item (can be negative for refunds)
    - Look for item patterns:
      * Lists: "Items: Coffee $5.50, Sandwich $20.00"
      * Descriptions: "bought coffee for $5.50", "a sandwich costing $20"
@@ -572,7 +572,7 @@ CRITICAL EXTRACTION RULES:
 - For payment accounts: Include ALL identifying information (card type, last 4 digits, payment method)
 - For items: Extract ALL mentioned items, don't skip any
 - If the text is ambiguous, make reasonable inferences but note in confidence score
-- All prices must be positive numbers
+- Prices can be negative for refunds or returns
 - All dates must be in YYYY-MM-DD format
 - Category names must exactly match one from the list: [${categoryList}]
 
@@ -855,7 +855,7 @@ export async function recognizeReceiptFromAudio(audioUri: string): Promise<Gemin
    - Name (name)
    - Category (categoryName): Automatically select one from [${categoryList}] based on item content
    - Purpose (purpose): Select one from [${purposeList}]. DEFAULT to "Home" unless there is clear evidence indicating otherwise (e.g., explicit business expense mention, gift purchase indication). Most receipts are personal/family use, so use "Home" as the default.
-   - Unit price (price, numeric type)
+   - Unit price (price, numeric type, can be negative for refunds)
 8. Data consistency check (dataConsistency):
    - itemsSum: Sum of all item prices (calculate: sum of all items.price)
    - itemsSumMatchesTotal: Boolean indicating if itemsSum + tax (if any) equals totalAmount (within 0.01 tolerance)

@@ -200,10 +200,12 @@ export default function HomeScreen() {
     }
   }, [isLoggedIn]);
 
-  // 使用 useFocusEffect 在页面获得焦点时检查 pending invitations（用于从其他页面返回时刷新）
+  // 使用 useFocusEffect 在页面获得焦点时检查 pending invitations 和重新加载家庭信息（用于从其他页面返回时刷新）
   useFocusEffect(
     useCallback(() => {
       if (isLoggedIn) {
+        // 重新加载家庭信息（用于从管理页切换家庭后返回时更新）
+        loadHousehold();
         checkPendingInvitations();
       }
     }, [isLoggedIn])
@@ -253,8 +255,8 @@ export default function HomeScreen() {
 
   const loadHousehold = async () => {
     try {
-      // 使用缓存，不需要强制刷新（除非数据被修改了）
-      const household = await getCurrentHousehold();
+      // 强制刷新，确保从管理页切换家庭后能获取最新数据
+      const household = await getCurrentHousehold(true);
       setCurrentHouseholdState(household);
       
       // 加载家庭后检查 pending invitations（已有关联家庭的用户）

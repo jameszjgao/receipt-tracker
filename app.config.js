@@ -2,7 +2,8 @@ export default {
   expo: {
     name: 'Snap Receipt',
     slug: 'snap-receipt',
-    version: '1.1.2',
+    version: '1.2.0',
+    owner: 'aimlink',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
@@ -18,7 +19,7 @@ export default {
     },
     android: {
       package: 'com.snapreceipt.app',
-      versionCode: 5,
+      versionCode: 7,
       usesCleartextTraffic: true,
       permissions: [
         'CAMERA',
@@ -71,7 +72,7 @@ export default {
     scheme: 'snapreceipt',
     extra: {
       eas: {
-        projectId: "b9f86f38-62c6-4bf1-849b-aadccf272d7d"
+        projectId: "ab9f28b4-7d21-45e4-8c82-5d8cabfb2583"
       },
       supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL || '',
       supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',

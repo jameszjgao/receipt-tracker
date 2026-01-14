@@ -67,13 +67,14 @@ export default function CameraScreen() {
   }
 
   const takePicture = async () => {
-    if (!cameraRef.current) {
+    // 先保存相机引用的副本，避免在 setIsProcessing(true) 后引用丢失
+    const camera = cameraRef.current;
+    if (!camera) {
       Alert.alert('Error', 'Camera not ready. Please try again.');
       return;
     }
 
     try {
-      setIsProcessing(true);
       console.log('=== 开始拍照流程 ===');
       
       // 检查并请求存储权限（用于保存照片）
@@ -87,7 +88,6 @@ export default function CameraScreen() {
         console.log('[步骤 1/6] 请求后权限状态:', mediaPermission.status, mediaPermission.granted);
         
         if (!mediaPermission.granted) {
-          setIsProcessing(false);
           Alert.alert(
             'Permission Required',
             'Storage permission is required to save photos. Please grant permission in settings.',
@@ -99,11 +99,12 @@ export default function CameraScreen() {
       setStoragePermission(mediaPermission);
       console.log('[步骤 1/6] ✅ 存储权限已授予');
       
-      // 拍摄照片
+      // 拍摄照片（在设置 isProcessing 之前，使用保存的相机引用）
       console.log('[步骤 2/6] 开始拍摄照片...');
       let photo;
       try {
-        photo = await cameraRef.current.takePictureAsync({
+        // 使用保存的相机引用，而不是 cameraRef.current（可能在渲染后变为 null）
+        photo = await camera.takePictureAsync({
           quality: 0.6,
           base64: false,
           skipProcessing: false,
@@ -111,7 +112,6 @@ export default function CameraScreen() {
         console.log('[步骤 2/6] takePictureAsync 返回结果:', photo ? '成功' : '失败');
       } catch (captureError) {
         console.error('[步骤 2/6] ❌ 拍照失败:', captureError);
-        setIsProcessing(false);
         const errorMsg = captureError instanceof Error ? captureError.message : String(captureError);
         Alert.alert(
           'Capture Failed',
@@ -122,7 +122,6 @@ export default function CameraScreen() {
       }
 
       if (!photo || !photo.uri) {
-        setIsProcessing(false);
         console.error('[步骤 2/6] ❌ Photo capture failed: photo is null or uri is missing');
         Alert.alert('Error', 'Failed to capture image. Photo object is invalid.');
         return;
@@ -131,6 +130,9 @@ export default function CameraScreen() {
       console.log('[步骤 2/6] ✅ 照片拍摄成功');
       console.log('[步骤 2/6] 照片 URI:', photo.uri);
       console.log('[步骤 2/6] 照片宽度:', photo.width, '高度:', photo.height);
+
+      // 照片拍摄成功后，再设置 isProcessing 为 true（此时相机引用已经使用完毕）
+      setIsProcessing(true);
 
       // 1. 预处理图片（压缩、调整大小）
       console.log('[步骤 3/6] 开始预处理图片...');
