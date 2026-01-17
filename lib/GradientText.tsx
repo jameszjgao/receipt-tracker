@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, ViewStyle, TextStyle, LayoutChangeEvent } from 'react-native';
+import { View, Text, ViewStyle, TextStyle, LayoutChangeEvent, Platform } from 'react-native';
 import MaskedView from '@react-native-community/masked-view';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -29,11 +29,17 @@ export const GradientText: React.FC<GradientTextProps> = ({
     }
   });
 
+  // 在Android上使用渐变的第一个颜色作为单色文字颜色，在iOS上保留渐变效果
+  const isAndroid = Platform.OS === 'android';
+  const solidColor = colors[0] || '#6C5CE7'; // 使用第一个渐变颜色或默认主题色
+
   const textStyle: TextStyle = {
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
     ...style,
+    // Android上使用单色，iOS上不需要设置颜色（渐变会处理）
+    ...(isAndroid && { color: solidColor }),
   };
 
   const onLayout = (event: LayoutChangeEvent) => {
@@ -43,6 +49,16 @@ export const GradientText: React.FC<GradientTextProps> = ({
     }
   };
 
+  // Android上直接使用单色文字，避免MaskedView的兼容性问题
+  if (isAndroid) {
+    return (
+      <View style={[{ alignItems: 'center', justifyContent: 'center' }, containerStyle]}>
+        <Text style={textStyle}>{lines.join('\n')}</Text>
+      </View>
+    );
+  }
+
+  // iOS上保留渐变效果
   return (
     <View style={[{ alignItems: 'center', justifyContent: 'center' }, containerStyle]}>
       {dimensions.width > 0 && dimensions.height > 0 ? (
