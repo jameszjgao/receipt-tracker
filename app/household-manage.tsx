@@ -113,7 +113,7 @@ export default function HouseholdManageScreen() {
         >
           <Ionicons name="arrow-back" size={24} color="#2D3436" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Household Information</Text>
+        <Text style={styles.headerTitle}>Space Information</Text>
         <View style={styles.headerRight} />
       </View>
 

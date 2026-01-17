@@ -329,7 +329,7 @@ export default function SetupHouseholdScreen() {
             {creating ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.createButtonText}>Create Household</Text>
+              <Text style={styles.createButtonText}>Create Space</Text>
             )}
           </TouchableOpacity>
           </View>

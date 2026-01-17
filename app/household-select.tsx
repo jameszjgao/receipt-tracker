@@ -50,7 +50,7 @@ export default function HouseholdSelectScreen() {
       // 如果没有家庭或需要选择，显示选择页面
     } catch (error) {
       console.error('Error loading households:', error);
-      Alert.alert('Error', 'Failed to load households');
+      Alert.alert('Error', 'Failed to load spaces');
     } finally {
       setLoading(false);
     }
@@ -72,13 +72,13 @@ export default function HouseholdSelectScreen() {
       router.replace('/');
     } catch (error) {
       console.error('Error selecting household:', error);
-      Alert.alert('Error', 'Failed to select household');
+      Alert.alert('Error', 'Failed to select space');
     }
   };
 
   const handleCreateHousehold = async () => {
     if (!newHouseholdName.trim()) {
-      Alert.alert('Error', 'Please enter household name');
+      Alert.alert('Error', 'Please enter space name');
       return;
     }
 
@@ -108,7 +108,7 @@ export default function HouseholdSelectScreen() {
       }
     } catch (error) {
       console.error('Error creating household:', error);
-      Alert.alert('Error', 'Failed to create household');
+      Alert.alert('Error', 'Failed to create space');
     } finally {
       setCreating(false);
     }
@@ -136,13 +136,13 @@ export default function HouseholdSelectScreen() {
               <Ionicons name="home" size={60} color="#6C5CE7" />
             </View>
           </View>
-          <Text style={styles.title}>Select Household</Text>
-          <Text style={styles.subtitle}>Choose or create a household to continue</Text>
+          <Text style={styles.title}>Select Space</Text>
+          <Text style={styles.subtitle}>Choose or create a space to continue</Text>
         </View>
 
         {households.length > 0 && (
           <View style={styles.householdsList}>
-            <Text style={styles.sectionTitle}>Your Households</Text>
+            <Text style={styles.sectionTitle}>Your Spaces</Text>
             {households.map((userHousehold) => (
               <TouchableOpacity
                 key={userHousehold.id}
@@ -155,7 +155,7 @@ export default function HouseholdSelectScreen() {
                 </View>
                 <View style={styles.householdInfo}>
                   <Text style={styles.householdName}>
-                    {userHousehold.household?.name || 'Unknown Household'}
+                    {userHousehold.household?.name || 'Unknown Space'}
                   </Text>
                   {userHousehold.household?.address && (
                     <Text style={styles.householdAddress} numberOfLines={1}>
@@ -175,7 +175,7 @@ export default function HouseholdSelectScreen() {
           activeOpacity={0.7}
         >
           <Ionicons name="add-circle-outline" size={24} color="#6C5CE7" />
-          <Text style={styles.createButtonText}>Create New Household</Text>
+          <Text style={styles.createButtonText}>Create New Space</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -191,7 +191,7 @@ export default function HouseholdSelectScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Create Household Modal */}
+      {/* Create Space Modal */}
       <Modal
         visible={showCreateModal}
         animationType="slide"
@@ -201,7 +201,7 @@ export default function HouseholdSelectScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Create New Household</Text>
+              <Text style={styles.modalTitle}>Create New Space</Text>
               <TouchableOpacity
                 onPress={() => setShowCreateModal(false)}
                 style={styles.closeButton}
@@ -215,7 +215,7 @@ export default function HouseholdSelectScreen() {
                 <Ionicons name="home-outline" size={20} color="#636E72" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Household Name"
+                  placeholder="Space Name"
                   placeholderTextColor="#95A5A6"
                   value={newHouseholdName}
                   onChangeText={setNewHouseholdName}

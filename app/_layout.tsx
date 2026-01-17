@@ -53,6 +53,18 @@ export default function RootLayout() {
           }} 
         />
         <Stack.Screen 
+          name="reset-password" 
+          options={{ 
+            headerShown: false
+          }} 
+        />
+        <Stack.Screen 
+          name="set-password" 
+          options={{ 
+            headerShown: false
+          }} 
+        />
+        <Stack.Screen 
           name="categories-manage" 
           options={{ 
             title: 'Manage Categories',
@@ -79,7 +91,7 @@ export default function RootLayout() {
         <Stack.Screen 
           name="household-members" 
           options={{ 
-            title: 'Household Members',
+            title: 'Space Members',
             headerBackTitle: 'Back',
             headerBackButtonVisible: true,
             presentation: 'card', // 确保使用 card 模式，避免导航问题
@@ -95,7 +107,7 @@ export default function RootLayout() {
         <Stack.Screen 
           name="household-manage" 
           options={{ 
-            title: 'Household Information'
+            title: 'Space Information'
           }} 
         />
         <Stack.Screen 

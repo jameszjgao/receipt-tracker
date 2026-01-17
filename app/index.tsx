@@ -390,7 +390,7 @@ export default function HomeScreen() {
         await loadHouseholds();
         await loadHousehold();
         setShowHouseholdSwitch(false);
-        Alert.alert('Success', 'Household created successfully');
+        Alert.alert('Success', 'Space created successfully');
       }
     } catch (error) {
       console.error('Error creating household:', error);
@@ -457,8 +457,8 @@ export default function HomeScreen() {
       </View>
       
       <View style={styles.content}>
-        <Text style={styles.title}>📸 Snap a receipt,</Text>
-        <Text style={styles.subtitle}>Organize everything</Text>
+        <Text style={styles.title}>📸 Cap Vouchers,</Text>
+        <Text style={styles.subtitle}>Master Accounting.</Text>
         
         <TouchableOpacity 
           style={styles.iconContainer}
@@ -489,7 +489,7 @@ export default function HomeScreen() {
         <Text style={styles.secondaryButtonText}>View Receipts List</Text>
       </TouchableOpacity>
 
-      {/* Household Switch Modal */}
+      {/* Space Switch Modal */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -504,7 +504,7 @@ export default function HomeScreen() {
           <View style={styles.pickerBottomSheet} onStartShouldSetResponder={() => true}>
             <View style={styles.pickerHandle} />
             <View style={styles.pickerHeader}>
-              <Text style={styles.pickerTitle}>Switch Household</Text>
+              <Text style={styles.pickerTitle}>Switch Space</Text>
             </View>
             <ScrollView style={styles.pickerScrollView} showsVerticalScrollIndicator={false}>
               {households.map((userHousehold) => (
@@ -527,7 +527,7 @@ export default function HomeScreen() {
                       styles.pickerOptionText,
                       currentHousehold?.id === userHousehold.householdId && styles.pickerOptionTextSelected
                     ]}>
-                      {userHousehold.household?.name || 'Unnamed Household'}
+                      {userHousehold.household?.name || 'Unnamed Space'}
                     </Text>
                     {userHousehold.household?.address && (
                       <Text style={styles.householdOptionAddress} numberOfLines={1}>
@@ -563,7 +563,7 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Create Household Modal */}
+      {/* Create Space Modal */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -573,7 +573,7 @@ export default function HomeScreen() {
         <View style={styles.pickerOverlay}>
           <View style={styles.createModalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Create New Household</Text>
+              <Text style={styles.modalTitle}>Create New Space</Text>
               <TouchableOpacity
                 onPress={() => {
                   setShowCreateModal(false);
@@ -589,7 +589,7 @@ export default function HomeScreen() {
             <View style={styles.createModalBody}>
               <TextInput
                 style={styles.createModalInput}
-                placeholder="Household Name"
+                placeholder="Space Name"
                 placeholderTextColor="#95A5A6"
                 value={newHouseholdName}
                 onChangeText={setNewHouseholdName}

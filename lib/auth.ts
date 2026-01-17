@@ -736,7 +736,7 @@ export async function signUp(email: string, password: string, householdName?: st
                   process.env.NODE_ENV === 'development';
     const redirectUrl = isDev 
       ? 'exp://localhost:8081/--/auth/confirm' // 开发环境
-      : 'snapreceipt://auth/confirm'; // 生产环境
+      : 'voucap://auth/confirm'; // 生产环境
     
     // 准备用户信息，用于在 data 中传递（即使需要邮箱确认也能使用）
     const userNameFinal = userName || email.split('@')[0];
@@ -1138,3 +1138,77 @@ export async function isAuthenticated(): Promise<boolean> {
   }
 }
 
+// 发送密码重置邮件
+export async function resetPassword(email: string): Promise<{ error: Error | null }> {
+  try {
+    // 验证 Supabase 配置
+    const config = validateSupabaseConfig();
+    if (!config.valid) {
+      return {
+        error: new Error(
+          '网络配置错误：Supabase 未正确配置。\n\n' +
+          '请在 EAS Secrets 中设置：\n' +
+          '- EXPO_PUBLIC_SUPABASE_URL\n' +
+          '- EXPO_PUBLIC_SUPABASE_ANON_KEY\n\n' +
+          '然后重新构建应用。'
+        ),
+      };
+    }
+
+    // 构建重置密码的重定向 URL
+    const isDev = Constants.expoConfig?.extra?.supabaseUrl?.includes('localhost') || 
+                  process.env.NODE_ENV === 'development';
+    const redirectUrl = isDev 
+      ? 'exp://localhost:8081/--/auth/confirm' // 开发环境
+      : 'voucap://auth/confirm'; // 生产环境
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: redirectUrl,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return { error: null };
+  } catch (error) {
+    console.error('Error resetting password:', error);
+    return {
+      error: error instanceof Error ? error : new Error('发送密码重置邮件失败'),
+    };
+  }
+}
+
+// 更新密码（用于密码重置后设置新密码）
+export async function updatePassword(newPassword: string): Promise<{ error: Error | null }> {
+  try {
+    // 验证 Supabase 配置
+    const config = validateSupabaseConfig();
+    if (!config.valid) {
+      return {
+        error: new Error(
+          '网络配置错误：Supabase 未正确配置。\n\n' +
+          '请在 EAS Secrets 中设置：\n' +
+          '- EXPO_PUBLIC_SUPABASE_URL\n' +
+          '- EXPO_PUBLIC_SUPABASE_ANON_KEY\n\n' +
+          '然后重新构建应用。'
+        ),
+      };
+    }
+
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return { error: null };
+  } catch (error) {
+    console.error('Error updating password:', error);
+    return {
+      error: error instanceof Error ? error : new Error('更新密码失败'),
+    };
+  }
+}

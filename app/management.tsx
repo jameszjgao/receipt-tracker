@@ -111,7 +111,7 @@ export default function ManagementScreen() {
 
   const handleSave = async () => {
     if (!household || !householdName.trim()) {
-      Alert.alert('Error', 'Household name cannot be empty');
+      Alert.alert('Error', 'Space name cannot be empty');
       return;
     }
 
@@ -144,7 +144,7 @@ export default function ManagementScreen() {
       setEditing(false);
     } catch (error) {
       console.error('Error updating household:', error);
-      Alert.alert('Error', 'Failed to update household information');
+      Alert.alert('Error', 'Failed to update space information');
     } finally {
       setSaving(false);
     }
@@ -248,7 +248,7 @@ export default function ManagementScreen() {
       await loadData();
     } catch (error) {
       console.error('Error switching household:', error);
-      Alert.alert('Error', 'Failed to switch household');
+      Alert.alert('Error', 'Failed to switch space');
     } finally {
       setSwitching(false);
     }
@@ -261,7 +261,7 @@ export default function ManagementScreen() {
 
   const handleCreateHousehold = async () => {
     if (!newHouseholdName.trim()) {
-      Alert.alert('Error', 'Please enter household name');
+      Alert.alert('Error', 'Please enter space name');
       return;
     }
 
@@ -273,7 +273,7 @@ export default function ManagementScreen() {
       );
 
       if (error) {
-        Alert.alert('Error', error.message || 'Failed to create household');
+        Alert.alert('Error', error.message || 'Failed to create space');
         setCreating(false);
         return;
       }
@@ -285,11 +285,11 @@ export default function ManagementScreen() {
         await loadHouseholds();
         await loadData();
         setShowHouseholdSwitch(false);
-        Alert.alert('Success', 'Household created successfully');
+        Alert.alert('Success', 'Space created successfully');
       }
     } catch (error) {
       console.error('Error creating household:', error);
-      Alert.alert('Error', 'Failed to create household');
+      Alert.alert('Error', 'Failed to create space');
     } finally {
       setCreating(false);
     }
@@ -439,8 +439,8 @@ export default function ManagementScreen() {
           </View>
         </View>
 
-        {/* Household Information Section */}
-        <Text style={styles.sectionTag}>Household Information</Text>
+        {/* Space Information Section */}
+        <Text style={styles.sectionTag}>Space Information</Text>
         <View style={styles.householdInfoCard}>
           <View style={styles.cardHeader}>
             <Ionicons name="home-outline" size={20} color="#6C5CE7" />
@@ -450,14 +450,14 @@ export default function ManagementScreen() {
                   style={styles.input}
                   value={householdName}
                   onChangeText={setHouseholdName}
-                  placeholder="Enter household name"
+                  placeholder="Enter space name"
                   autoFocus
                 />
                 <TextInput
                   style={[styles.input, styles.multilineInput]}
                   value={householdAddress}
                   onChangeText={setHouseholdAddress}
-                  placeholder="Enter household address (optional)"
+                  placeholder="Enter space address (optional)"
                   multiline
                   numberOfLines={3}
                   textAlignVertical="top"
@@ -545,7 +545,7 @@ export default function ManagementScreen() {
         ))}
       </ScrollView>
 
-      {/* Switch Household Button and Sign Out Button */}
+      {/* Switch Space Button and Sign Out Button */}
       <View style={styles.bottomContainer}>
         <TouchableOpacity
           style={styles.switchHouseholdButton}
@@ -553,7 +553,7 @@ export default function ManagementScreen() {
           activeOpacity={0.7}
         >
           <Ionicons name="swap-horizontal-outline" size={20} color="#6C5CE7" />
-          <Text style={styles.switchHouseholdButtonText}>Switch Household</Text>
+          <Text style={styles.switchHouseholdButtonText}>Switch Space</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.signOutButton}
@@ -580,7 +580,7 @@ export default function ManagementScreen() {
           <View style={styles.pickerBottomSheet} onStartShouldSetResponder={() => true}>
             <View style={styles.pickerHandle} />
             <View style={styles.pickerHeader}>
-              <Text style={styles.pickerTitle}>Switch Household</Text>
+              <Text style={styles.pickerTitle}>Switch Space</Text>
             </View>
             <ScrollView style={styles.pickerScrollView} showsVerticalScrollIndicator={false}>
               {households.map((userHousehold) => (
@@ -603,7 +603,7 @@ export default function ManagementScreen() {
                       styles.pickerOptionText,
                       household?.id === userHousehold.householdId && styles.pickerOptionTextSelected
                     ]}>
-                      {userHousehold.household?.name || 'Unnamed Household'}
+                      {userHousehold.household?.name || 'Unnamed Space'}
                     </Text>
                     {userHousehold.household?.address && (
                       <Text style={styles.householdOptionAddress} numberOfLines={1}>
@@ -639,7 +639,7 @@ export default function ManagementScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Create Household Modal */}
+      {/* Create Space Modal */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -649,7 +649,7 @@ export default function ManagementScreen() {
         <View style={styles.pickerOverlay}>
           <View style={styles.createModalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Create New Household</Text>
+              <Text style={styles.modalTitle}>Create New Space</Text>
               <TouchableOpacity
                 onPress={() => {
                   setShowCreateModal(false);
@@ -665,7 +665,7 @@ export default function ManagementScreen() {
             <View style={styles.createModalBody}>
               <TextInput
                 style={styles.createModalInput}
-                placeholder="Household Name"
+                placeholder="Space Name"
                 placeholderTextColor="#95A5A6"
                 value={newHouseholdName}
                 onChangeText={setNewHouseholdName}

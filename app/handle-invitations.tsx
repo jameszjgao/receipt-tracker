@@ -58,7 +58,7 @@ export default function HandleInvitationsScreen() {
       
       for (const invitation of invitations) {
         // 直接使用从数据库获取的household_name，不再查询households表
-        const householdName = invitation.householdName || 'Unknown Household';
+        const householdName = invitation.householdName || 'Unknown Space';
         
         console.log('Processing invitation:', {
           id: invitation.id,
@@ -76,7 +76,7 @@ export default function HandleInvitationsScreen() {
       }
       
       // 如果没有获取到家庭名称或邀请者email，记录警告
-      const invitationsWithoutInfo = invitationsWithNames.filter(inv => inv.name === 'Unknown Household' || !inv.inviterEmail);
+      const invitationsWithoutInfo = invitationsWithNames.filter(inv => inv.name === 'Unknown Space' || !inv.inviterEmail);
       if (invitationsWithoutInfo.length > 0) {
         console.warn('Some invitations missing info:', invitationsWithoutInfo);
       }
@@ -108,7 +108,7 @@ export default function HandleInvitationsScreen() {
       });
       
       // 使用householdName字段（如果存在），否则使用name字段作为fallback
-      setHouseholdName(invitation.householdName || invitation.name || 'Unknown Household');
+      setHouseholdName(invitation.householdName || invitation.name || 'Unknown Space');
       setInviterEmail(invitation.inviterEmail || '');
       setInviteId(invitation.id);
       setInviteHouseholdId(invitation.householdId);
@@ -213,7 +213,7 @@ export default function HandleInvitationsScreen() {
       const { error } = await acceptInvitation(inviteId);
       
       if (error) {
-        Alert.alert('Error', error.message || 'Failed to join household');
+        Alert.alert('Error', error.message || 'Failed to join space');
         setAcceptingInvite(false);
         return;
       }
@@ -265,7 +265,7 @@ export default function HandleInvitationsScreen() {
       }
     } catch (error) {
       console.error('Error accepting invitation:', error);
-      Alert.alert('Error', 'Failed to join household');
+      Alert.alert('Error', 'Failed to join space');
       setAcceptingInvite(false);
     }
   };
@@ -518,9 +518,9 @@ export default function HandleInvitationsScreen() {
                 ) : (
                   <Text style={styles.inviterEmailMain}>Someone</Text>
                 )}
-                <Text style={styles.inviterEmailLabel}>has invited you to join Household</Text>
+                <Text style={styles.inviterEmailLabel}>has invited you to join Space</Text>
                 {/* 突出显示家庭名称 */}
-                {householdName && householdName !== 'Unknown Household' && (
+                {householdName && householdName !== 'Unknown Space' && (
                   <View style={styles.householdNameContainer}>
                     <Text style={styles.householdNameText}>{householdName}</Text>
                   </View>

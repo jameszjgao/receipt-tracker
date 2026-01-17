@@ -1,83 +1,71 @@
 export default {
   expo: {
-    name: 'Snap Receipt',
-    slug: 'snap-receipt',
-    version: '1.2.0',
-    owner: 'aimlink',
-    orientation: 'portrait',
-    icon: './assets/icon.png',
-    userInterfaceStyle: 'light',
+    name: "VouCap",
+    slug: "voucap",
+    version: "1.3.0",
+    owner: "aimlink",
+    orientation: "portrait",
+    icon: "./assets/icon.png",
+    scheme: "voucap", // 关键：解决邮件跳转的核心配置
+    userInterfaceStyle: "light",
     splash: {
-      backgroundColor: '#ffffff',
-      resizeMode: 'contain',
+      backgroundColor: "#ffffff",
+      resizeMode: "contain"
     },
-    assetBundlePatterns: ['**/*'],
+    assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: 'com.snapreceipt.app',
-      associatedDomains: ['applinks:snapreceipt.app'],
+      bundleIdentifier: "com.voucap.app",
+      associatedDomains: ["applinks:voucap.app"]
     },
     android: {
-      package: 'com.snapreceipt.app',
-      versionCode: 7,
-      usesCleartextTraffic: true,
+      package: "com.voucap.app",
+      versionCode: 5,
       permissions: [
-        'CAMERA',
-        'READ_EXTERNAL_STORAGE',
-        'WRITE_EXTERNAL_STORAGE',
-        'READ_MEDIA_IMAGES',
-        'ACCESS_NETWORK_STATE',
-        'INTERNET',
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES",
+        "ACCESS_NETWORK_STATE",
+        "INTERNET"
       ],
       adaptiveIcon: {
-        foregroundImage: './assets/icon.png',
-        backgroundColor: '#ffffff',
+        foregroundImage: "./assets/icon.png",
+        backgroundColor: "#ffffff"
       },
       intentFilters: [
         {
-          action: 'VIEW',
+          action: "VIEW",
           autoVerify: true,
           data: [
             {
-              scheme: 'https',
-              host: 'snapreceipt.app',
-              pathPrefix: '/',
+              scheme: "https",
+              host: "voucap.app",
+              pathPrefix: "/"
             },
             {
-              scheme: 'snapreceipt',
-            },
+              scheme: "voucap" // 允许通过 voucap:// 唤起
+            }
           ],
-          category: ['BROWSABLE', 'DEFAULT'],
-        },
-      ],
-    },
-    web: {
+          category: ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     plugins: [
-      'expo-font',
       [
-        'expo-image-picker',
+        "expo-image-picker",
         {
-          photosPermission: 'Snap Receipt needs access to your photo library to select receipt images.',
-          cameraPermission: 'Snap Receipt needs access to your camera to capture receipts.',
-        },
+          "photosPermission": "VouCap needs access to your photo library.",
+          "cameraPermission": "VouCap needs access to your camera."
+        }
       ],
-      [
-        'expo-camera',
-        {
-          cameraPermission: 'Snap Receipt needs access to your camera to capture receipts.',
-        },
-      ],
+      ["expo-camera", { "cameraPermission": "VouCap needs access to your camera." }]
     ],
-    scheme: 'snapreceipt',
+    // 这里通过扩展运算符引入 app.json 中的 projectId，保持同步
     extra: {
       eas: {
         projectId: "ab9f28b4-7d21-45e4-8c82-5d8cabfb2583"
-      },
-      supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL || '',
-      supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
-      geminiApiKey: process.env.EXPO_PUBLIC_GEMINI_API_KEY || '',
-    },
-  },
+      }
+    }
+  }
 };
-

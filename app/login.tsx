@@ -164,14 +164,25 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.linkButton}
-              onPress={() => router.push('/register')}
-            >
-              <Text style={styles.linkText}>
-                Don't have an account? <Text style={styles.linkTextBold}>Sign Up</Text>
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.linksContainer}>
+              <TouchableOpacity
+                style={styles.linkButton}
+                onPress={() => router.push('/reset-password')}
+              >
+                <Text style={styles.linkText}>
+                  Forgot password? <Text style={styles.linkTextBold}>Reset It</Text>
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.linkButton}
+                onPress={() => router.push('/register')}
+              >
+                <Text style={styles.linkText}>
+                  Don't have an account? <Text style={styles.linkTextBold}>Sign Up</Text>
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -252,7 +263,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 8,
-    marginBottom: 24,
+    marginBottom: 32,
     shadowColor: '#6C5CE7',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -267,8 +278,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
+  linksContainer: {
+    gap: 24,
+  },
   linkButton: {
     alignItems: 'center',
+    paddingVertical: 8,
   },
   linkText: {
     fontSize: 14,
