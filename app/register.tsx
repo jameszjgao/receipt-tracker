@@ -141,7 +141,7 @@ export default function RegisterScreen() {
             </View>
           </View>
           <Text style={styles.title}>Create Account</Text>
-          <Text style={styles.subtitle}>Start your receipt tracking journey</Text>
+          <Text style={styles.subtitle}>Start your voucher tracking journey</Text>
         </View>
 
         <View style={styles.form}>

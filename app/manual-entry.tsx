@@ -124,7 +124,7 @@ export default function ManualEntryScreen() {
         >
           <Ionicons name="arrow-back" size={24} color="#2D3436" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Add Receipt</Text>
+        <Text style={styles.headerTitle}>Add Voucher</Text>
         <View style={styles.placeholder} />
       </View>
 

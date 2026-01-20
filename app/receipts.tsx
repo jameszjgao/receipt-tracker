@@ -68,7 +68,7 @@ export default function ReceiptsScreen() {
       const data = await getAllReceipts();
       setReceipts(data);
     } catch (error) {
-      Alert.alert('Error', 'Failed to load receipts');
+      Alert.alert('Error', 'Failed to load vouchers');
       console.error(error);
     } finally {
       setLoading(false);
@@ -233,8 +233,8 @@ export default function ReceiptsScreen() {
 
   const handleDeleteSingle = async (receiptId: string) => {
     Alert.alert(
-      'Delete Receipt',
-      'Are you sure you want to delete this receipt?',
+      'Delete Voucher',
+      'Are you sure you want to delete this voucher?',
       [
         { text: 'Cancel', style: 'cancel' },
         {

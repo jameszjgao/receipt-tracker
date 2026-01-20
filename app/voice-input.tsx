@@ -124,7 +124,7 @@ export default function VoiceInputScreen() {
       // 添加识别结果预览消息（包含支付账户信息用于显示，状态为pending）
       const previewMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: `I've extracted the receipt details:`,
+        text: `I've extracted the voucher details:`,
         isUser: false,
         timestamp: new Date(),
         receiptPreview: { 

@@ -23,14 +23,14 @@ export default function RootLayout() {
         <Stack.Screen 
           name="receipts" 
           options={{ 
-            title: 'My Receipts',
+            title: 'All Vouchers',
             headerBackTitle: 'Home'
           }} 
         />
         <Stack.Screen 
           name="receipt-details/[id]" 
           options={{ 
-          title: 'Receipt Details'
+          title: 'Voucher Details'
           }} 
         />
         <Stack.Screen 
@@ -120,7 +120,7 @@ export default function RootLayout() {
         <Stack.Screen 
           name="manual-entry" 
           options={{ 
-            title: 'Add Receipt',
+            title: 'Add Voucher',
             presentation: 'modal'
           }} 
         />

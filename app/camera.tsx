@@ -49,13 +49,13 @@ export default function CameraScreen() {
   if (!permission.granted) {
     return (
       <View style={styles.container}>
-        <Text style={styles.message}>Camera permission is required to capture receipts</Text>
+        <Text style={styles.message}>Camera permission is required to capture vouchers</Text>
         <TouchableOpacity style={styles.button} onPress={async () => {
           const result = await requestPermission();
           if (!result.granted) {
             Alert.alert(
               'Permission Required',
-              'Camera permission is required to capture receipts. Please grant permission in settings.',
+              'Camera permission is required to capture vouchers. Please grant permission in settings.',
               [{ text: 'OK' }]
             );
           }

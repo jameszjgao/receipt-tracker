@@ -486,7 +486,7 @@ export default function HomeScreen() {
         onPress={() => router.push('/receipts')}
       >
         <Ionicons name="list-outline" size={20} color="#6C5CE7" style={styles.buttonIcon} />
-        <Text style={styles.secondaryButtonText}>View Receipts List</Text>
+        <Text style={styles.secondaryButtonText}>Vouchers List</Text>
       </TouchableOpacity>
 
       {/* Space Switch Modal */}

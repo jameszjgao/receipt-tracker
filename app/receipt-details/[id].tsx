@@ -109,7 +109,7 @@ export default function ReceiptDetailsScreen() {
         setPriceInputTexts(priceTexts);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to load receipt details');
+      Alert.alert('Error', 'Failed to load voucher details');
       console.error(error);
     } finally {
       setLoading(false);
@@ -124,7 +124,7 @@ export default function ReceiptDetailsScreen() {
         ...editedReceipt,
         status: 'confirmed' as ReceiptStatus,
       });
-      Alert.alert('Success', 'Receipt confirmed and saved');
+      Alert.alert('Success', 'Voucher confirmed and saved');
       setEditing(false);
       // 只重新加载当前小票，不需要重新加载分类、用途和支付账户
       loadReceipt();
@@ -143,7 +143,7 @@ export default function ReceiptDetailsScreen() {
       });
       loadReceipt();
     } catch (error) {
-      Alert.alert('Error', 'Failed to confirm receipt');
+      Alert.alert('Error', 'Failed to confirm voucher');
       console.error(error);
     }
   };
@@ -352,7 +352,7 @@ export default function ReceiptDetailsScreen() {
               // 请求相机权限
               const { status } = await ImagePicker.requestCameraPermissionsAsync();
               if (status !== 'granted') {
-                Alert.alert('Permission Needed', 'Snap Receipt needs access to your camera to take photos.');
+                Alert.alert('Permission Needed', 'VouCap needs access to your camera to take photos.');
                 return;
               }
 
@@ -380,7 +380,7 @@ export default function ReceiptDetailsScreen() {
               // 请求图片库权限
               const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
               if (status !== 'granted') {
-                Alert.alert('Permission Needed', 'Snap Receipt needs access to your photo library to upload images.');
+                Alert.alert('Permission Needed', 'VouCap needs access to your photo library to upload images.');
                 return;
               }
 
@@ -442,7 +442,7 @@ export default function ReceiptDetailsScreen() {
   if (!receipt) {
     return (
       <View style={styles.container}>
-        <Text style={styles.errorText}>Receipt not found</Text>
+        <Text style={styles.errorText}>Voucher not found</Text>
       </View>
     );
   }
@@ -452,7 +452,7 @@ export default function ReceiptDetailsScreen() {
   if (!currentReceipt) {
     return (
       <View style={styles.container}>
-        <Text style={styles.errorText}>Receipt not found</Text>
+        <Text style={styles.errorText}>Voucher not found</Text>
       </View>
     );
   }
