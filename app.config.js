@@ -59,7 +59,13 @@ export default {
           "cameraPermission": "Vouchap needs access to your camera."
         }
       ],
-      ["expo-camera", { "cameraPermission": "Vouchap needs access to your camera." }]
+      ["expo-camera", { "cameraPermission": "Vouchap needs access to your camera." }],
+      [
+        "react-native-document-scanner-plugin",
+        {
+          "cameraPermission": "We need camera access to scan receipts."
+        }
+      ]
     ],
     // 这里通过扩展运算符引入 app.json 中的 projectId，保持同步
     extra: {
