@@ -32,8 +32,28 @@ export default function SetPasswordScreen() {
   const checkAuth = async () => {
     const authenticated = await isAuthenticated();
     if (!authenticated) {
-      Alert.alert('Error', 'Session expired. Please request a new password reset.');
-      router.replace('/login');
+      // 如果没有 session，可能是从邮件链接跳转过来的，但 session 还没有设置
+      // 等待一下再检查，因为 auth/confirm 页面可能正在设置 session
+      setTimeout(async () => {
+        const retryAuth = await isAuthenticated();
+        if (!retryAuth) {
+          Alert.alert(
+            'Session Expired',
+            'Your password reset session has expired. Please request a new password reset link.',
+            [
+              {
+                text: 'Request New Link',
+                onPress: () => router.replace('/reset-password'),
+              },
+              {
+                text: 'Cancel',
+                style: 'cancel',
+                onPress: () => router.replace('/login'),
+              },
+            ]
+          );
+        }
+      }, 2000);
     }
   };
 

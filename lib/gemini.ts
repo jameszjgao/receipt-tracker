@@ -121,16 +121,112 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
   const categoryList = categoryNames.join(', ');
   const purposeList = purposeNames.join(', ');
 
-  const prompt = `You are a financial expert. Please analyze the receipt in this image and extract:
-1. Store name (storeName)
-2. Date (date, format: YYYY-MM-DD)
-3. Total amount (totalAmount, numeric type, can be negative for refunds)
-4. Currency (currency, such as: CNY, USD, etc.)
-5. Payment account (paymentAccountName, if available, MUST include key distinguishing information such as:
-   - Card number suffix (last 4 digits, e.g., ****1234, *1234, Last 4: 1234)
-   - Account type (Credit Card, Debit Card, Cash, etc.)
-   - Any other identifying information that helps distinguish different payment methods)
-6. Tax amount (tax, numeric type, 0 if not available)
+  const prompt = `You are a financial expert specializing in North American receipts. Analyze the receipt image and extract ALL available information with maximum accuracy.
+
+1. Store name (storeName): Extract the complete merchant/store name from the receipt header (usually the most prominent text at the top). 
+   - Look for: Company name, business name, brand name, or store chain name
+   - DO NOT use generic terms like "Receipt", "Invoice", "Bill", "Processing", "Pending", or status words
+   - If truly unidentifiable, use "Unknown Store" only as last resort
+
+2. Store information (storeInfo) - CRITICAL: Extract ALL visible merchant information. Scan the ENTIRE receipt including header, footer, and all corners.
+   
+   - Tax number (taxNumber): Extract ALL tax identification numbers if present. This is ESSENTIAL for merchant identification.
+     * United States formats:
+       - EIN (Employer Identification Number): XX-XXXXXXX (e.g., 12-3456789)
+       - Look for labels: "EIN", "Tax ID", "Federal Tax ID", "Employer ID"
+     * Canada formats:
+       - GST/HST Number: 9 digits, may include RT (e.g., 123456789RT0001, GST/HST #123456789)
+       - PST Number: Provincial Sales Tax number (varies by province)
+       - QST Number: Quebec Sales Tax number
+       - Look for labels: "GST", "HST", "PST", "QST", "GST/HST #", "Tax Registration #"
+     * Other North American formats:
+       - Business Number (BN): 9 digits (Canada)
+       - State Tax ID (varies by US state)
+     * Common locations: Near store name at top, footer, or near tax calculation section
+     * **Extract ALL tax numbers if multiple are present (e.g., both GST and PST)**
+   
+   - Phone (phone): Extract the phone number if available. This is IMPORTANT contact information.
+     * North American formats (most common):
+       - (XXX) XXX-XXXX (e.g., (416) 555-1234)
+       - XXX-XXX-XXXX (e.g., 416-555-1234)
+       - XXX.XXX.XXXX (e.g., 416.555.1234)
+       - 1-XXX-XXX-XXXX (with country code)
+     * Toll-free numbers: 1-800-XXX-XXXX, 1-888-XXX-XXXX, 1-877-XXX-XXXX, 1-866-XXX-XXXX
+     * Common locations: Header, footer, customer service section
+     * Common labels: "Phone:", "Tel:", "Call:", "Customer Service:", "T:", "P:"
+     * **Extract the main business phone number (prefer customer service or main line over fax)**
+   
+   - Address (address): Extract the COMPLETE business address. This is CRITICAL location information.
+     * North American address format:
+       - Street address: Building number + Street name (e.g., "123 Main Street", "456 Oak Ave")
+       - City, State/Province, ZIP/Postal Code
+       - US format: "123 Main St, New York, NY 10001"
+       - Canada format: "123 Main St, Toronto, ON M5H 2N2" (postal code format: A1A 1A1)
+     * Include ALL visible details:
+       - Unit/suite number if present (e.g., "Suite 200", "Unit 5")
+       - Street direction if present (e.g., "North", "South", "E", "W")
+       - Full state/province name or abbreviation
+       - Complete ZIP/postal code
+     * Common locations: Header, footer, or dedicated address section
+     * Common labels: "Address:", "Location:", "Store Address:", "Business Address:"
+     * **If multiple addresses are present, prefer the physical store/business address over mailing or registered address**
+     * **For chain stores, prefer the specific location address over corporate headquarters**
+
+3. Date (date, format: YYYY-MM-DD): Extract the purchase/transaction date from the receipt
+   - Common North American formats on receipts:
+     * Full date: MM/DD/YYYY, DD/MM/YYYY, YYYY-MM-DD, or written format (e.g., "March 15, 2024")
+     * 6-digit date: MM/DD/YY or DD/MM/YY (e.g., "03/15/24" or "15/03/24")
+   - Look for: Transaction date, purchase date, sale date, or date near receipt header
+   - **CRITICAL for 6-digit dates (MM/DD/YY or DD/MM/YY):**
+     * North American receipts typically use MM/DD/YY format (month/day/year)
+     * However, some receipts may use DD/MM/YY format
+     * **Resolution strategy:**
+       1. If format is ambiguous (e.g., "03/15/24" could be March 15 or May 3):
+          - **Prioritize the date that is CLOSER to the current date in the past**
+          - Receipts are typically from recent transactions (within days, weeks, or months)
+          - Example: If today is 2024-03-20 and you see "03/15/24":
+            * MM/DD/YY interpretation: 2024-03-15 (5 days ago) ✓ CORRECT
+            * DD/MM/YY interpretation: 2024-15-03 (invalid date) ✗
+          - Example: If today is 2024-05-20 and you see "03/15/24":
+            * MM/DD/YY interpretation: 2024-03-15 (66 days ago) ✓ CORRECT
+            * DD/MM/YY interpretation: 2024-15-03 (invalid date) ✗
+          - Example: If today is 2024-05-20 and you see "15/03/24":
+            * DD/MM/YY interpretation: 2024-03-15 (66 days ago) ✓ CORRECT
+            * MM/DD/YY interpretation: 2024-15-03 (invalid date) ✗
+       2. If both interpretations are valid dates:
+          - Choose the date that is **closer to the current date** (but still in the past)
+          - Receipts are almost always from past transactions, not future dates
+       3. If one interpretation results in a future date and the other in a past date:
+          - **Always choose the past date** (receipts cannot be from the future)
+       4. If one interpretation results in an invalid date (e.g., month > 12 or day > 31):
+          - Use the valid interpretation
+     * Convert 2-digit year to 4-digit:
+       - If YY is 00-30, assume 2000-2030 (e.g., "24" → 2024)
+       - If YY is 31-99, assume 1931-1999 (e.g., "95" → 1995)
+       - However, for recent receipts, prefer current century (2000s)
+   - Convert to YYYY-MM-DD format (e.g., "03/15/2024" → "2024-03-15", "03/15/24" → "2024-03-15")
+
+4. Total amount (totalAmount, numeric type, can be negative for refunds)
+   - Extract the final total amount (after taxes)
+   - Common labels: "Total", "Amount Due", "Grand Total", "TOTAL"
+   - Exclude tip/gratuity if separately listed
+
+5. Currency (currency, ISO code such as: USD, CAD, MXN, etc.)
+   - US receipts: Usually USD
+   - Canadian receipts: Usually CAD
+   - Mexican receipts: Usually MXN
+   - If not explicitly stated, infer from location or receipt context
+6. Payment account (paymentAccountName, if available, MUST include key distinguishing information):
+   - Card number suffix: Last 4 digits (e.g., ****1234, *1234, Last 4: 1234, ending in 1234)
+   - Account type: Credit Card, Debit Card, Cash, Check, Gift Card, etc.
+   - Card brand if visible: Visa, Mastercard, Amex, Discover, etc.
+   - Any other identifying information (e.g., "Visa ending in 1234", "Cash", "Debit Card *5678")
+
+7. Tax amount (tax, numeric type, 0 if not available)
+   - Extract total tax amount (sum of all taxes if multiple)
+   - Common labels: "Tax", "GST", "HST", "PST", "QST", "Sales Tax", "State Tax", "Provincial Tax"
+   - If multiple taxes (e.g., GST + PST), sum them for total tax
+   - If tax is included in item prices, use 0
 7. Detailed item list (items), each item contains:
    - Name (name)
    - Category (categoryName): Automatically select one from [${categoryList}] based on item content
@@ -154,10 +250,15 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
 
 Please return strictly in JSON format without any extra text. JSON format as follows:
 {
-  "storeName": "Store Name",
+  "storeName": "Store Name (must be actual merchant name, not generic terms like 'Receipt', 'Processing', or status words)",
+  "storeInfo": {
+    "taxNumber": "12-3456789 or GST/HST #123456789 (Extract ALL tax numbers if visible. Use null ONLY if truly not found after scanning entire receipt)",
+    "phone": "(416) 555-1234 or 416-555-1234 (Extract main business phone if visible. Use null ONLY if truly not found)",
+    "address": "123 Main Street, Toronto, ON M5H 2N2 (Extract COMPLETE address including street, city, state/province, ZIP/postal code if visible. Use null ONLY if truly not found)"
+  },
   "date": "2024-03-13",
   "totalAmount": 123.45,
-  "currency": "CNY",
+  "currency": "USD",
   "paymentAccountName": "Credit Card ****1234",
   "tax": 5.67,
   "items": [
@@ -285,14 +386,14 @@ Please return strictly in JSON format without any extra text. JSON format as fol
         storeName: parsedResult.storeName || 'Unknown Store',
         date: parsedResult.date || new Date().toISOString().split('T')[0],
         totalAmount: totalAmount,
-        currency: parsedResult.currency || defaultCurrency,
+        currency: parsedResult.currency || 'CNY',
         paymentAccountName: paymentAccountName,
         tax: tax,
         items: parsedResult.items.map(item => ({
           name: item.name || 'Unknown Item',
           categoryName: item.categoryName || defaultCategory, // Use first category as default
           price: Number(item.price) || 0,
-          purposeName: item.purpose || 'Home',
+          purposeName: item.purposeName || 'Home',
           isAsset: item.isAsset !== undefined ? Boolean(item.isAsset) : false,
           confidence: item.confidence !== undefined ? Number(item.confidence) : 0.8,
         })),

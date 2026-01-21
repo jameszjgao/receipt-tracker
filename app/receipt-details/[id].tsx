@@ -109,7 +109,7 @@ export default function ReceiptDetailsScreen() {
         setPriceInputTexts(priceTexts);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to load voucher details');
+      Alert.alert('Error', 'Failed to load receipt details');
       console.error(error);
     } finally {
       setLoading(false);
@@ -124,7 +124,7 @@ export default function ReceiptDetailsScreen() {
         ...editedReceipt,
         status: 'confirmed' as ReceiptStatus,
       });
-      Alert.alert('Success', 'Voucher confirmed and saved');
+      Alert.alert('Success', 'Receipt confirmed and saved');
       setEditing(false);
       // 只重新加载当前小票，不需要重新加载分类、用途和支付账户
       loadReceipt();
@@ -143,7 +143,7 @@ export default function ReceiptDetailsScreen() {
       });
       loadReceipt();
     } catch (error) {
-      Alert.alert('Error', 'Failed to confirm voucher');
+      Alert.alert('Error', 'Failed to confirm receipt');
       console.error(error);
     }
   };
@@ -236,6 +236,9 @@ export default function ReceiptDetailsScreen() {
     setEditedReceipt({
       ...editedReceipt,
       storeName: storeName,
+      // 如果修改了商家名称，清除 storeId，让系统重新查找或创建商家
+      storeId: undefined,
+      store: undefined,
     });
   };
 
@@ -329,9 +332,17 @@ export default function ReceiptDetailsScreen() {
     });
   };
 
+  // 解析日期字符串为本地时区，避免 UTC 时区转换问题
+  const parseLocalDate = (dateString: string): Date => {
+    // dateString 格式应为 "YYYY-MM-DD"
+    const [year, month, day] = dateString.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
   const formatDate = (dateString: string) => {
     try {
-      return format(new Date(dateString), 'MMM dd, yyyy');
+      const date = parseLocalDate(dateString);
+      return format(date, 'MMM dd, yyyy');
     } catch {
       return dateString;
     }
@@ -352,7 +363,7 @@ export default function ReceiptDetailsScreen() {
               // 请求相机权限
               const { status } = await ImagePicker.requestCameraPermissionsAsync();
               if (status !== 'granted') {
-                Alert.alert('Permission Needed', 'VouCap needs access to your camera to take photos.');
+                Alert.alert('Permission Needed', 'Vouchap needs access to your camera to take photos.');
                 return;
               }
 
@@ -380,7 +391,7 @@ export default function ReceiptDetailsScreen() {
               // 请求图片库权限
               const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
               if (status !== 'granted') {
-                Alert.alert('Permission Needed', 'VouCap needs access to your photo library to upload images.');
+                Alert.alert('Permission Needed', 'Vouchap needs access to your photo library to upload images.');
                 return;
               }
 
@@ -442,7 +453,7 @@ export default function ReceiptDetailsScreen() {
   if (!receipt) {
     return (
       <View style={styles.container}>
-        <Text style={styles.errorText}>Voucher not found</Text>
+        <Text style={styles.errorText}>Receipt not found</Text>
       </View>
     );
   }
@@ -452,7 +463,7 @@ export default function ReceiptDetailsScreen() {
   if (!currentReceipt) {
     return (
       <View style={styles.container}>
-        <Text style={styles.errorText}>Voucher not found</Text>
+        <Text style={styles.errorText}>Receipt not found</Text>
       </View>
     );
   }
@@ -495,14 +506,14 @@ export default function ReceiptDetailsScreen() {
                 {editing ? (
                   <TextInput
                     style={styles.storeNameInput}
-                    value={editedReceipt?.storeName || ''}
+                    value={editedReceipt?.storeName || editedReceipt?.store?.name || currentReceipt.store?.name || currentReceipt.storeName || ''}
                     onChangeText={handleStoreNameChange}
                     placeholder="Store name"
                     maxLength={100}
                   />
                 ) : (
                   <Text style={styles.storeName} numberOfLines={1}>
-                    {currentReceipt.storeName}
+                    {currentReceipt.store?.name || currentReceipt.storeName || 'Unknown Store'}
                   </Text>
                 )}
                 <View style={styles.amountRow}>
@@ -1344,7 +1355,7 @@ export default function ReceiptDetailsScreen() {
                     </TouchableOpacity>
                   </View>
                   <DateTimePicker
-                    value={editedReceipt?.date ? new Date(editedReceipt.date) : new Date()}
+                    value={editedReceipt?.date ? parseLocalDate(editedReceipt.date) : new Date()}
                     mode="date"
                     display="spinner"
                     onChange={handleDateChange}
@@ -1355,7 +1366,7 @@ export default function ReceiptDetailsScreen() {
             </Modal>
           ) : (
             <DateTimePicker
-              value={editedReceipt?.date ? new Date(editedReceipt.date) : new Date()}
+              value={editedReceipt?.date ? parseLocalDate(editedReceipt.date) : new Date()}
               mode="date"
               display="default"
               onChange={handleDateChange}

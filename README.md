@@ -1,4 +1,4 @@
-# VouCap
+# Vouchap
 
 一个基于 React Native + Expo 的家庭记账应用，支持拍摄消费小票，使用 Gemini AI 识别并整理成明细，存储到 Supabase 数据库。
 

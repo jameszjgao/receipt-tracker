@@ -457,7 +457,7 @@ export default function HomeScreen() {
       </View>
       
       <View style={styles.content}>
-        <Text style={styles.title}>📸 Cap Vouchers,</Text>
+        <Text style={styles.title}>📸 Snap Vouchers,</Text>
         <Text style={styles.subtitle}>Master Accounting.</Text>
         
         <TouchableOpacity 
@@ -486,7 +486,7 @@ export default function HomeScreen() {
         onPress={() => router.push('/receipts')}
       >
         <Ionicons name="list-outline" size={20} color="#6C5CE7" style={styles.buttonIcon} />
-        <Text style={styles.secondaryButtonText}>Vouchers List</Text>
+        <Text style={styles.secondaryButtonText}>Receipts List</Text>
       </TouchableOpacity>
 
       {/* Space Switch Modal */}

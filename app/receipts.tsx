@@ -22,7 +22,12 @@ import { supabase } from '@/lib/supabase';
 import { getCurrentUser } from '@/lib/auth';
 import { SwipeableRow } from './SwipeableRow';
 
-type GroupByType = 'month' | 'paymentAccount' | 'createdBy';
+// 分组类型：
+// - month: 按交易时间（票面日期）的月份分组
+// - recordDate: 按记录时间（创建时间）的日期分组（按天）
+// - paymentAccount: 按支付账户分组
+// - createdBy: 按提交人分组
+type GroupByType = 'month' | 'recordDate' | 'paymentAccount' | 'createdBy';
 
 const statusColors: Record<ReceiptStatus, string> = {
   pending: '#FF9500',
@@ -57,10 +62,13 @@ export default function ReceiptsScreen() {
   const [groupBy, setGroupBy] = useState<GroupByType>('month');
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+  // 交易时间（月维度：YYYY-MM）
   const [selectedMonths, setSelectedMonths] = useState<Set<string>>(new Set());
+  // 记录时间（日维度：YYYY-MM-DD）
+  const [selectedRecordDates, setSelectedRecordDates] = useState<Set<string>>(new Set());
   const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(new Set());
   const [selectedCreators, setSelectedCreators] = useState<Set<string>>(new Set());
-  const [filterSubMenu, setFilterSubMenu] = useState<'main' | 'month' | 'account' | 'creator'>('main');
+  const [filterSubMenu, setFilterSubMenu] = useState<'main' | 'month' | 'recordDate' | 'account' | 'creator'>('main');
   const router = useRouter();
 
   const loadReceipts = useCallback(async () => {
@@ -68,7 +76,7 @@ export default function ReceiptsScreen() {
       const data = await getAllReceipts();
       setReceipts(data);
     } catch (error) {
-      Alert.alert('Error', 'Failed to load vouchers');
+      Alert.alert('Error', 'Failed to load receipts');
       console.error(error);
     } finally {
       setLoading(false);
@@ -233,8 +241,8 @@ export default function ReceiptsScreen() {
 
   const handleDeleteSingle = async (receiptId: string) => {
     Alert.alert(
-      'Delete Voucher',
-      'Are you sure you want to delete this voucher?',
+      'Delete Receipt',
+      'Are you sure you want to delete this receipt?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -291,9 +299,17 @@ export default function ReceiptsScreen() {
     );
   };
 
+  // 解析日期字符串为本地时区，避免 UTC 时区转换问题
+  const parseLocalDate = (dateString: string): Date => {
+    // dateString 格式应为 "YYYY-MM-DD"
+    const [year, month, day] = dateString.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
   const formatDate = (dateString: string) => {
     try {
-      return format(new Date(dateString), 'MMM dd, yyyy');
+      const date = parseLocalDate(dateString);
+      return format(date, 'MMM dd, yyyy');
     } catch {
       return dateString;
     }
@@ -312,20 +328,27 @@ export default function ReceiptsScreen() {
       } else if (diffHours < 24) {
         return `${diffHours} hours ago`;
       } else {
-        return formatDate(dateString);
+        // 对于超过24小时的时间戳，需要先提取日期部分再格式化
+        // dateString 可能是 ISO 时间戳（如 "2024-01-15T10:30:00Z"）
+        let dateOnly = dateString;
+        if (dateString.includes('T')) {
+          // 从 ISO 时间戳中提取日期部分
+          dateOnly = dateString.split('T')[0];
+        }
+        return formatDate(dateOnly);
       }
     } catch {
       return dateString;
     }
   };
 
-  // 按月份分组小票
+  // 按交易时间（票面日期）的月份分组小票
   const groupReceiptsByMonth = useCallback((receipts: Receipt[]): SectionData[] => {
     const grouped = new Map<string, Receipt[]>();
     
     receipts.forEach(receipt => {
       try {
-        const date = new Date(receipt.date);
+        const date = parseLocalDate(receipt.date);
         const monthKey = `month-${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
         
         if (!grouped.has(monthKey)) {
@@ -340,11 +363,59 @@ export default function ReceiptsScreen() {
     // 转换为数组并按月份倒序排列（最新的在前）
     return Array.from(grouped.entries())
       .map(([monthKey, data]) => {
-        const date = new Date(data[0].date);
+        const date = parseLocalDate(data[0].date);
         return {
           title: format(date, 'MMMM yyyy'),
           monthKey,
-          data: data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+          data: data.sort((a, b) => parseLocalDate(b.date).getTime() - parseLocalDate(a.date).getTime()),
+        };
+      })
+      .sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+  }, []);
+
+  // 按记录时间（创建时间，按天）分组小票
+  const groupReceiptsByRecordDate = useCallback((receipts: Receipt[]): SectionData[] => {
+    const grouped = new Map<string, Receipt[]>();
+
+    receipts.forEach(receipt => {
+      try {
+        if (!receipt.createdAt) {
+          return;
+        }
+        const createdAt = new Date(receipt.createdAt);
+        const year = createdAt.getFullYear();
+        const month = String(createdAt.getMonth() + 1).padStart(2, '0');
+        const day = String(createdAt.getDate()).padStart(2, '0');
+        const dayKey = `record-${year}-${month}-${day}`;
+
+        if (!grouped.has(dayKey)) {
+          grouped.set(dayKey, []);
+        }
+        grouped.get(dayKey)!.push(receipt);
+      } catch (error) {
+        console.error('Error parsing createdAt:', receipt.createdAt, error);
+      }
+    });
+
+    // 转换为数组并按日期倒序排列（最新的在前）
+    return Array.from(grouped.entries())
+      .map(([dayKey, data]) => {
+        const sample = data[0];
+        const baseDate = sample.createdAt ? new Date(sample.createdAt) : parseLocalDate(sample.date);
+        const dateOnly = new Date(
+          baseDate.getFullYear(),
+          baseDate.getMonth(),
+          baseDate.getDate()
+        );
+
+        return {
+          title: format(dateOnly, 'MMM dd, yyyy'),
+          monthKey: dayKey,
+          data: data.slice().sort((a, b) => {
+            const aTime = a.createdAt ? new Date(a.createdAt).getTime() : parseLocalDate(a.date).getTime();
+            const bTime = b.createdAt ? new Date(b.createdAt).getTime() : parseLocalDate(b.date).getTime();
+            return bTime - aTime;
+          }),
         };
       })
       .sort((a, b) => b.monthKey.localeCompare(a.monthKey));
@@ -371,7 +442,7 @@ export default function ReceiptsScreen() {
         return {
           title: accountName,
           monthKey: accountKey,
-          data: data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+          data: data.sort((a, b) => parseLocalDate(b.date).getTime() - parseLocalDate(a.date).getTime()),
         };
       })
       .sort((a, b) => {
@@ -403,7 +474,7 @@ export default function ReceiptsScreen() {
         return {
           title: userName,
           monthKey: userKey,
-          data: data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+          data: data.sort((a, b) => parseLocalDate(b.date).getTime() - parseLocalDate(a.date).getTime()),
         };
       })
       .sort((a, b) => a.title.localeCompare(b.title));
@@ -412,6 +483,8 @@ export default function ReceiptsScreen() {
   // 根据分组类型获取分组数据
   const getGroupedReceipts = useCallback((receipts: Receipt[]): SectionData[] => {
     switch (groupBy) {
+      case 'recordDate':
+        return groupReceiptsByRecordDate(receipts);
       case 'paymentAccount':
         return groupReceiptsByPaymentAccount(receipts);
       case 'createdBy':
@@ -420,19 +493,36 @@ export default function ReceiptsScreen() {
       default:
         return groupReceiptsByMonth(receipts);
     }
-  }, [groupBy, groupReceiptsByMonth, groupReceiptsByPaymentAccount, groupReceiptsByCreatedBy]);
+  }, [groupBy, groupReceiptsByMonth, groupReceiptsByRecordDate, groupReceiptsByPaymentAccount, groupReceiptsByCreatedBy]);
 
   // 筛选小票（交集筛选）
   const filteredReceipts = useMemo(() => {
     let filtered = receipts;
 
-    // 按月份筛选
+    // 按交易时间（月）筛选
     if (selectedMonths.size > 0) {
       filtered = filtered.filter(receipt => {
         try {
-          const date = new Date(receipt.date);
+          const date = parseLocalDate(receipt.date);
           const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
           return selectedMonths.has(monthKey);
+        } catch {
+          return false;
+        }
+      });
+    }
+
+    // 按记录时间（创建时间，按天）筛选
+    if (selectedRecordDates.size > 0) {
+      filtered = filtered.filter(receipt => {
+        if (!receipt.createdAt) return false;
+        try {
+          const createdAt = new Date(receipt.createdAt);
+          const year = createdAt.getFullYear();
+          const month = String(createdAt.getMonth() + 1).padStart(2, '0');
+          const day = String(createdAt.getDate()).padStart(2, '0');
+          const dayKey = `${year}-${month}-${day}`;
+          return selectedRecordDates.has(dayKey);
         } catch {
           return false;
         }
@@ -460,17 +550,30 @@ export default function ReceiptsScreen() {
 
   // 获取所有可用的筛选选项
   const filterOptions = useMemo(() => {
-    const months = new Set<string>();
+    const months = new Set<string>(); // 交易时间（月）
+    const recordDates = new Set<string>(); // 记录时间（天）
     const accounts = new Map<string, string>(); // id -> name
     const creators = new Map<string, string>(); // id -> name
 
     receipts.forEach(receipt => {
-      // 月份
+      // 交易时间（月）
       try {
-        const date = new Date(receipt.date);
+        const date = parseLocalDate(receipt.date);
         const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
         months.add(monthKey);
       } catch {}
+
+      // 记录时间（天）
+      if (receipt.createdAt) {
+        try {
+          const createdAt = new Date(receipt.createdAt);
+          const year = createdAt.getFullYear();
+          const month = String(createdAt.getMonth() + 1).padStart(2, '0');
+          const day = String(createdAt.getDate()).padStart(2, '0');
+          const dayKey = `${year}-${month}-${day}`;
+          recordDates.add(dayKey);
+        } catch {}
+      }
 
       // 账户
       if (receipt.paymentAccount) {
@@ -490,6 +593,8 @@ export default function ReceiptsScreen() {
 
     // 将月份转换为排序后的数组
     const sortedMonths = Array.from(months).sort((a, b) => b.localeCompare(a));
+    // 将记录时间（天）转换为排序后的数组
+    const sortedRecordDates = Array.from(recordDates).sort((a, b) => b.localeCompare(a));
 
     return {
       months: sortedMonths.map(monthKey => {
@@ -498,6 +603,14 @@ export default function ReceiptsScreen() {
         return {
           key: monthKey,
           label: format(date, 'MMMM yyyy'),
+        };
+      }),
+      recordDates: sortedRecordDates.map(dayKey => {
+        const [year, month, day] = dayKey.split('-');
+        const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+        return {
+          key: dayKey,
+          label: format(date, 'MMM dd, yyyy'),
         };
       }),
       accounts: Array.from(accounts.entries()).map(([id, name]) => ({ id, name })),
@@ -514,8 +627,9 @@ export default function ReceiptsScreen() {
     const query = searchQuery.trim().toLowerCase();
     
     return filteredReceipts.filter(receipt => {
-      // 搜索商户名称
-      const storeNameMatch = receipt.storeName?.toLowerCase().includes(query);
+      // 搜索商户名称（优先使用 store.name，兼容旧数据的 storeName）
+      const displayStoreName = receipt.store?.name || receipt.storeName || '';
+      const storeNameMatch = displayStoreName.toLowerCase().includes(query);
       
       // 搜索商品明细名称
       const itemsMatch = receipt.items?.some(item => 
@@ -582,9 +696,9 @@ export default function ReceiptsScreen() {
           >
             <Text style={styles.filterText}>
               Filter
-              {(selectedMonths.size > 0 || selectedAccounts.size > 0 || selectedCreators.size > 0) && (
+              {(selectedMonths.size > 0 || selectedRecordDates.size > 0 || selectedAccounts.size > 0 || selectedCreators.size > 0) && (
                 <Text style={styles.filterBadge}>
-                  {' '}({selectedMonths.size + selectedAccounts.size + selectedCreators.size})
+                  {' '}({selectedMonths.size + selectedRecordDates.size + selectedAccounts.size + selectedCreators.size})
                 </Text>
               )}
             </Text>
@@ -667,7 +781,7 @@ export default function ReceiptsScreen() {
             <View style={styles.receiptContent}>
                   <View style={styles.firstRow}>
               <Text style={styles.storeName} numberOfLines={1}>
-                {item.storeName}
+                {item.store?.name || item.storeName || 'Unknown Store'}
               </Text>
                 {item.status === 'confirmed' ? (
                   <View style={styles.confirmedStatusContainer}>
@@ -797,7 +911,7 @@ export default function ReceiptsScreen() {
                     groupBy === 'month' && styles.pickerOptionTextSelected,
                   ]}
                 >
-                  By Month
+                  By Transaction Month
                 </Text>
                 {groupBy === 'month' && (
                   <Ionicons name="checkmark" size={20} color="#6C5CE7" />
@@ -845,9 +959,33 @@ export default function ReceiptsScreen() {
                     groupBy === 'createdBy' && styles.pickerOptionTextSelected,
                   ]}
                 >
-                  By Creator
+                  By Recorder
                 </Text>
                 {groupBy === 'createdBy' && (
+                  <Ionicons name="checkmark" size={20} color="#6C5CE7" />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.pickerOption,
+                  groupBy === 'recordDate' && styles.pickerOptionSelected,
+                ]}
+                onPress={() => {
+                  setGroupBy('recordDate');
+                  setShowSortMenu(false);
+                }}
+              >
+                <Ionicons name="time-outline" size={20} color={groupBy === 'recordDate' ? '#6C5CE7' : '#636E72'} />
+                <Text
+                  style={[
+                    styles.pickerOptionText,
+                    groupBy === 'recordDate' && styles.pickerOptionTextSelected,
+                  ]}
+                >
+                  By Record Date
+                </Text>
+                {groupBy === 'recordDate' && (
                   <Ionicons name="checkmark" size={20} color="#6C5CE7" />
                 )}
               </TouchableOpacity>
@@ -881,10 +1019,11 @@ export default function ReceiptsScreen() {
                 <>
                   <Text style={styles.pickerTitle}>Filter</Text>
                   <View style={styles.pickerHeaderRight}>
-                    {(selectedMonths.size > 0 || selectedAccounts.size > 0 || selectedCreators.size > 0) && (
+                    {(selectedMonths.size > 0 || selectedRecordDates.size > 0 || selectedAccounts.size > 0 || selectedCreators.size > 0) && (
                       <TouchableOpacity
                         onPress={() => {
                           setSelectedMonths(new Set());
+                          setSelectedRecordDates(new Set());
                           setSelectedAccounts(new Set());
                           setSelectedCreators(new Set());
                         }}
@@ -913,9 +1052,10 @@ export default function ReceiptsScreen() {
                     <Ionicons name="chevron-back" size={20} color="#6C5CE7" />
                   </TouchableOpacity>
                   <Text style={styles.pickerTitle}>
-                    {filterSubMenu === 'month' && 'Select Months'}
+                    {filterSubMenu === 'month' && 'Select Transaction Months'}
+                    {filterSubMenu === 'recordDate' && 'Select Record Dates'}
                     {filterSubMenu === 'account' && 'Select Accounts'}
-                    {filterSubMenu === 'creator' && 'Select Creators'}
+                    {filterSubMenu === 'creator' && 'Select Recorders'}
                   </Text>
                   <TouchableOpacity
                     onPress={() => setFilterSubMenu('main')}
@@ -929,14 +1069,14 @@ export default function ReceiptsScreen() {
             <ScrollView style={styles.pickerScrollView} showsVerticalScrollIndicator={false}>
               {filterSubMenu === 'main' ? (
                 <>
-                  {/* 主菜单：三个维度选项 */}
+                  {/* 主菜单：多个维度选项 */}
                   <TouchableOpacity
                     style={styles.filterMainOption}
                     onPress={() => setFilterSubMenu('month')}
                   >
                     <View style={styles.filterMainOptionLeft}>
                       <Ionicons name="calendar-outline" size={20} color="#636E72" />
-                      <Text style={styles.filterMainOptionText}>Month</Text>
+                      <Text style={styles.filterMainOptionText}>Transaction Month</Text>
                     </View>
                     <View style={styles.filterMainOptionRight}>
                       {selectedMonths.size > 0 && (
@@ -968,11 +1108,27 @@ export default function ReceiptsScreen() {
                   >
                     <View style={styles.filterMainOptionLeft}>
                       <Ionicons name="person-outline" size={20} color="#636E72" />
-                      <Text style={styles.filterMainOptionText}>Creator</Text>
+                      <Text style={styles.filterMainOptionText}>Recorder</Text>
                     </View>
                     <View style={styles.filterMainOptionRight}>
                       {selectedCreators.size > 0 && (
                         <Text style={styles.filterCountBadge}>{selectedCreators.size}</Text>
+                      )}
+                      <Ionicons name="chevron-forward" size={20} color="#95A5A6" />
+                    </View>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.filterMainOption}
+                    onPress={() => setFilterSubMenu('recordDate')}
+                  >
+                    <View style={styles.filterMainOptionLeft}>
+                      <Ionicons name="time-outline" size={20} color="#636E72" />
+                      <Text style={styles.filterMainOptionText}>Record Date</Text>
+                    </View>
+                    <View style={styles.filterMainOptionRight}>
+                      {selectedRecordDates.size > 0 && (
+                        <Text style={styles.filterCountBadge}>{selectedRecordDates.size}</Text>
                       )}
                       <Ionicons name="chevron-forward" size={20} color="#95A5A6" />
                     </View>
@@ -1018,6 +1174,55 @@ export default function ReceiptsScreen() {
                             ]}
                           >
                             {month.label}
+                          </Text>
+                        </View>
+                        {isSelected && (
+                          <Ionicons name="checkmark" size={20} color="#6C5CE7" />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </>
+              ) : filterSubMenu === 'recordDate' ? (
+                <>
+                  {/* 记录时间（按天）子菜单 */}
+                  {filterOptions.recordDates.map(day => {
+                    const isSelected = selectedRecordDates.has(day.key);
+                    return (
+                      <TouchableOpacity
+                        key={day.key}
+                        style={[
+                          styles.pickerOption,
+                          isSelected && styles.pickerOptionSelected,
+                        ]}
+                        onPress={() => {
+                          setSelectedRecordDates(prev => {
+                            const newSet = new Set(prev);
+                            if (newSet.has(day.key)) {
+                              newSet.delete(day.key);
+                            } else {
+                              newSet.add(day.key);
+                            }
+                            return newSet;
+                          });
+                        }}
+                      >
+                        <View style={styles.filterOptionLeft}>
+                          <View style={[
+                            styles.filterCheckbox,
+                            isSelected && styles.filterCheckboxSelected,
+                          ]}>
+                            {isSelected && (
+                              <Ionicons name="checkmark" size={14} color="#fff" />
+                            )}
+                          </View>
+                          <Text
+                            style={[
+                              styles.pickerOptionText,
+                              isSelected && styles.pickerOptionTextSelected,
+                            ]}
+                          >
+                            {day.label}
                           </Text>
                         </View>
                         {isSelected && (

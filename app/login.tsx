@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const passwordInputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     if (params.email) {
@@ -119,14 +120,22 @@ export default function LoginScreen() {
                 onChangeText={setEmail}
                 autoCapitalize="none"
                 keyboardType="email-address"
-                autoComplete="email"
-                textContentType="emailAddress"
+                autoComplete="username"
+                textContentType="username"
+                autoCorrect={false}
+                returnKeyType="next"
+                onSubmitEditing={() => {
+                  passwordInputRef.current?.focus();
+                }}
+                accessibilityLabel="Email address"
+                editable={!loading}
               />
             </View>
 
             <View style={styles.inputContainer}>
               <Ionicons name="lock-closed-outline" size={20} color="#636E72" style={styles.inputIcon} />
               <TextInput
+                ref={passwordInputRef}
                 style={styles.input}
                 placeholder="Password"
                 placeholderTextColor="#95A5A6"
@@ -136,11 +145,17 @@ export default function LoginScreen() {
                 autoCapitalize="none"
                 autoComplete="password"
                 textContentType="password"
+                autoCorrect={false}
+                returnKeyType="done"
+                onSubmitEditing={handleLogin}
+                accessibilityLabel="Password"
+                editable={!loading}
               />
               <TouchableOpacity
                 onPress={() => setShowPassword(!showPassword)}
                 style={styles.eyeIcon}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityLabel={showPassword ? "Hide password" : "Show password"}
               >
                 <Ionicons
                   name={showPassword ? 'eye-outline' : 'eye-off-outline'}
@@ -242,6 +257,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E9ECEF',
     minHeight: 56,
+    // 优化触摸响应
+    justifyContent: 'flex-start',
   },
   inputIcon: {
     marginRight: 12,
@@ -252,6 +269,9 @@ const styles = StyleSheet.create({
     color: '#2D3436',
     paddingVertical: 0,
     minHeight: 24,
+    // 优化输入响应性
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   eyeIcon: {
     padding: 4,

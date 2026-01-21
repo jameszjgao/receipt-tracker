@@ -736,7 +736,7 @@ export async function signUp(email: string, password: string, householdName?: st
                   process.env.NODE_ENV === 'development';
     const redirectUrl = isDev 
       ? 'exp://localhost:8081/--/auth/confirm' // 开发环境
-      : 'voucap://auth/confirm'; // 生产环境
+      : 'vouchap://auth/confirm'; // 生产环境
     
     // 准备用户信息，用于在 data 中传递（即使需要邮箱确认也能使用）
     const userNameFinal = userName || email.split('@')[0];
@@ -1160,7 +1160,7 @@ export async function resetPassword(email: string): Promise<{ error: Error | nul
                   process.env.NODE_ENV === 'development';
     const redirectUrl = isDev 
       ? 'exp://localhost:8081/--/auth/confirm' // 开发环境
-      : 'voucap://auth/confirm'; // 生产环境
+      : 'vouchap://auth/confirm'; // 生产环境
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: redirectUrl,

@@ -124,7 +124,7 @@ export default function VoiceInputScreen() {
       // 添加识别结果预览消息（包含支付账户信息用于显示，状态为pending）
       const previewMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: `I've extracted the voucher details:`,
+        text: `I've extracted the receipt details:`,
         isUser: false,
         timestamp: new Date(),
         receiptPreview: { 
@@ -221,7 +221,16 @@ export default function VoiceInputScreen() {
                   <View style={styles.receiptPreviewRow}>
                     <Text style={styles.receiptPreviewLabel}>Date:</Text>
                     <Text style={styles.receiptPreviewValue}>
-                      {format(new Date(message.receiptPreview.date), 'MMM dd, yyyy')}
+                      {(() => {
+                        try {
+                          // 解析日期字符串为本地时区，避免 UTC 时区转换问题
+                          const [year, month, day] = message.receiptPreview.date.split('-').map(Number);
+                          const date = new Date(year, month - 1, day);
+                          return format(date, 'MMM dd, yyyy');
+                        } catch {
+                          return message.receiptPreview.date;
+                        }
+                      })()}
                     </Text>
                   </View>
                   <View style={styles.receiptPreviewRow}>

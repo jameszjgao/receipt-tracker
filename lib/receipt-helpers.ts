@@ -3,6 +3,7 @@ import { getCurrentUser } from './auth';
 import { findCategoryByName, getCategories } from './categories';
 import { findPurposeByName, getPurposes } from './purposes';
 import { findOrCreatePaymentAccount } from './payment-accounts';
+import { findOrCreateStore } from './stores';
 
 // 将 Gemini 识别结果转换为 Receipt 格式
 export async function convertGeminiResultToReceipt(result: GeminiReceiptResult): Promise<Receipt> {
@@ -12,6 +13,33 @@ export async function convertGeminiResultToReceipt(result: GeminiReceiptResult):
   // 获取所有分类和用途
   const categories = await getCategories();
   const purposes = await getPurposes();
+
+  // 处理商家（排除无效的商家名称，如 "Processing..." 等）
+  let storeId: string | undefined;
+  if (result.storeName && result.storeName.trim()) {
+    const trimmedStoreName = result.storeName.trim();
+    // 排除处理状态等无效名称
+    const invalidNames = ['processing', 'processing...', 'pending', 'pending...', 'loading', 'loading...', '识别中', '处理中', '待处理'];
+    const isValidName = !invalidNames.includes(trimmedStoreName.toLowerCase());
+    
+    if (isValidName) {
+      try {
+        const store = await findOrCreateStore(
+          trimmedStoreName,
+          true,
+          result.storeInfo?.taxNumber,
+          result.storeInfo?.phone,
+          result.storeInfo?.address
+        );
+        storeId = store.id;
+      } catch (error) {
+        console.warn('Failed to create or find store:', error);
+        // 如果商家创建失败，继续处理其他信息，不阻塞整个流程
+      }
+    } else {
+      console.warn(`Skipping invalid store name: "${trimmedStoreName}"`);
+    }
+  }
 
   // 处理支付账户
   let paymentAccountId: string | undefined;
@@ -186,6 +214,7 @@ export async function convertGeminiResultToReceipt(result: GeminiReceiptResult):
   return {
     householdId: user.householdId,
     storeName: result.storeName,
+    storeId: storeId,
     totalAmount: result.totalAmount,
     currency: result.currency,
     tax: result.tax,

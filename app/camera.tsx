@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { useState, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, Dimensions } from 'react-native';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,8 +8,9 @@ import { uploadReceiptImage, uploadReceiptImageTemp } from '@/lib/supabase';
 import { saveReceipt } from '@/lib/database';
 import { processReceiptInBackground } from '@/lib/receipt-processor';
 import { isAuthenticated } from '@/lib/auth';
-import { useEffect } from 'react';
-import { processImageForUpload } from '@/lib/image-processor';
+import { processImageForUpload, detectEdges } from '@/lib/image-processor';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export default function CameraScreen() {
   const [facing, setFacing] = useState<CameraType>('back');
@@ -19,6 +20,10 @@ export default function CameraScreen() {
   const [storagePermission, setStoragePermission] = useState<ImagePicker.MediaLibraryPermissionResponse | null>(null);
   const cameraRef = useRef<CameraView>(null);
   const router = useRouter();
+  
+  // 裁剪框状态（相对于屏幕的百分比位置，用于显示预览框）
+  // 实际裁剪会在拍摄后根据图片尺寸计算
+  const [showCropBox, setShowCropBox] = useState(true);
 
   useEffect(() => {
     checkAuth();
@@ -49,13 +54,13 @@ export default function CameraScreen() {
   if (!permission.granted) {
     return (
       <View style={styles.container}>
-        <Text style={styles.message}>Camera permission is required to capture vouchers</Text>
+        <Text style={styles.message}>Camera permission is required to capture receipts</Text>
         <TouchableOpacity style={styles.button} onPress={async () => {
           const result = await requestPermission();
           if (!result.granted) {
             Alert.alert(
               'Permission Required',
-              'Camera permission is required to capture vouchers. Please grant permission in settings.',
+              'Camera permission is required to capture receipts. Please grant permission in settings.',
               [{ text: 'OK' }]
             );
           }
@@ -134,12 +139,17 @@ export default function CameraScreen() {
       // 照片拍摄成功后，再设置 isProcessing 为 true（此时相机引用已经使用完毕）
       setIsProcessing(true);
 
-      // 1. 预处理图片（压缩、调整大小）
-      console.log('[步骤 3/6] 开始预处理图片...');
+      // 1. 预处理图片（压缩、调整大小、自动裁剪、图像增强）
+      console.log('[步骤 3/6] 开始预处理图片（包含自动裁剪和图像增强）...');
       let processedImageUri: string;
       try {
-        processedImageUri = await processImageForUpload(photo.uri);
-        console.log('[步骤 3/6] ✅ 图片预处理完成');
+        processedImageUri = await processImageForUpload(photo.uri, {
+          autoCrop: true,        // 启用自动裁剪（检测文档边缘，去除 5% 边距）
+          brightness: 0.1,      // 稍微增加亮度（通过优化压缩质量间接实现）
+          contrast: 0.15,       // 增加对比度（通过优化压缩质量间接实现）
+          quality: 0.85,        // 高质量压缩
+        });
+        console.log('[步骤 3/6] ✅ 图片预处理完成（包含自动裁剪和图像增强）');
         console.log('[步骤 3/6] 处理后 URI:', processedImageUri);
       } catch (preprocessError) {
         console.error('[步骤 3/6] ⚠️ 图片预处理失败，使用原始图片:', preprocessError);
@@ -147,15 +157,15 @@ export default function CameraScreen() {
       }
 
       // 2. 上传预处理后的图片到 Supabase Storage（使用临时文件名）
-      console.log('[步骤 4/6] 开始上传图片到 Supabase...');
+      console.log('[步骤 5/6] 开始上传图片到 Supabase...');
       const tempFileName = `temp-${Date.now()}`;
       let imageUrl: string;
       try {
         imageUrl = await uploadReceiptImageTemp(processedImageUri, tempFileName);
-        console.log('[步骤 4/6] ✅ 图片已上传');
-        console.log('[步骤 4/6] 图片 URL:', imageUrl);
+        console.log('[步骤 5/6] ✅ 图片已上传');
+        console.log('[步骤 5/6] 图片 URL:', imageUrl);
       } catch (uploadError) {
-        console.error('[步骤 4/6] ❌ 图片上传失败:', uploadError);
+        console.error('[步骤 5/6] ❌ 图片上传失败:', uploadError);
         setIsProcessing(false);
         const errorMsg = uploadError instanceof Error ? uploadError.message : String(uploadError);
         Alert.alert(
@@ -167,7 +177,7 @@ export default function CameraScreen() {
       }
 
       // 3. 先创建一个待处理的小票记录（状态为 processing，正在后台处理）
-      console.log('[步骤 5/6] 创建小票记录...');
+      console.log('[步骤 6/6] 创建小票记录...');
       const today = new Date().toISOString().split('T')[0];
       let receiptId: string;
       try {
@@ -249,10 +259,15 @@ export default function CameraScreen() {
       if (!result.canceled && result.assets[0]) {
         const imageUri = result.assets[0].uri;
         
-        // 1. 预处理图片（压缩、调整大小）
-        console.log('预处理选择的图片...');
-        const processedImageUri = await processImageForUpload(imageUri);
-        console.log('图片预处理完成:', processedImageUri);
+        // 1. 预处理图片（压缩、调整大小、自动裁剪、图像增强）
+        console.log('预处理选择的图片（包含自动裁剪和图像增强）...');
+        const processedImageUri = await processImageForUpload(imageUri, {
+          autoCrop: true,        // 启用自动裁剪
+          brightness: 0.1,       // 稍微增加亮度
+          contrast: 0.15,        // 增加对比度
+          quality: 0.85,         // 高质量压缩
+        });
+        console.log('图片预处理完成（包含自动裁剪和图像增强）:', processedImageUri);
         
         // 2. 上传预处理后的图片到 Supabase Storage（使用临时文件名）
         const tempFileName = `temp-${Date.now()}`;
@@ -369,6 +384,46 @@ export default function CameraScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* 裁剪框覆盖层 - 显示预览裁剪区域（支持倾斜拍摄的梯形预览） */}
+            {showCropBox && (
+              <View style={styles.cropBoxContainer} pointerEvents="none">
+                {/* 上半部分遮罩 */}
+                <View style={[styles.cropMask, { height: SCREEN_HEIGHT * 0.2 }]} />
+                
+                {/* 中间部分（裁剪框区域） */}
+                <View style={styles.cropBoxRow}>
+                  {/* 左侧遮罩 */}
+                  <View style={[styles.cropMask, { width: SCREEN_WIDTH * 0.1 }]} />
+                  
+                  {/* 裁剪框 - 使用 SVG 绘制四边形以支持倾斜预览 */}
+                  <View style={styles.cropBoxWrapper}>
+                    {/* 使用 View 模拟梯形裁剪框（倾斜效果） */}
+                    <View style={styles.cropBoxTrapezoid}>
+                      {/* 四个角的指示器 */}
+                      <View style={[styles.cropCorner, styles.cropCornerTopLeft]} />
+                      <View style={[styles.cropCorner, styles.cropCornerTopRight]} />
+                      <View style={[styles.cropCorner, styles.cropCornerBottomLeft]} />
+                      <View style={[styles.cropCorner, styles.cropCornerBottomRight]} />
+                    </View>
+                    
+                    {/* 提示文字 */}
+                    <View style={styles.cropHint}>
+                      <Text style={styles.cropHintText}>Preview: Auto-crop will be applied after capture</Text>
+                      <Text style={[styles.cropHintText, { fontSize: 12, marginTop: 4, opacity: 0.8 }]}>
+                        (Edge detection runs after photo is taken)
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  {/* 右侧遮罩 */}
+                  <View style={[styles.cropMask, { width: SCREEN_WIDTH * 0.1 }]} />
+                </View>
+                
+                {/* 下半部分遮罩 */}
+                <View style={[styles.cropMask, { flex: 1 }]} />
+              </View>
+            )}
+
             <View style={styles.bottomBar}>
               <TouchableOpacity style={styles.pickButton} onPress={pickImage}>
                 <Ionicons name="images" size={28} color="#fff" />
@@ -457,6 +512,89 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 16,
     fontWeight: '600',
+  },
+  cropBoxContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cropBoxRow: {
+    flexDirection: 'row',
+    width: '100%',
+    height: SCREEN_HEIGHT * 0.6,
+    alignItems: 'center',
+  },
+  cropBoxWrapper: {
+    width: SCREEN_WIDTH * 0.8,
+    height: SCREEN_HEIGHT * 0.6,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cropBoxTrapezoid: {
+    width: SCREEN_WIDTH * 0.75,
+    height: SCREEN_HEIGHT * 0.55,
+    borderWidth: 2,
+    borderColor: '#6C5CE7',
+    position: 'relative',
+    // 模拟轻微的倾斜效果（透视预览）
+    transform: [{ perspective: 1000 }, { rotateX: '2deg' }, { rotateY: '-1deg' }],
+  },
+  cropCorner: {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    borderColor: '#6C5CE7',
+  },
+  cropCornerTopLeft: {
+    top: -2,
+    left: -2,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+    borderTopLeftRadius: 8,
+  },
+  cropCornerTopRight: {
+    top: -2,
+    right: -2,
+    borderTopWidth: 4,
+    borderRightWidth: 4,
+    borderTopRightRadius: 8,
+  },
+  cropCornerBottomLeft: {
+    bottom: -2,
+    left: -2,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+    borderBottomLeftRadius: 8,
+  },
+  cropCornerBottomRight: {
+    bottom: -2,
+    right: -2,
+    borderBottomWidth: 4,
+    borderRightWidth: 4,
+    borderBottomRightRadius: 8,
+  },
+  cropMask: {
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  cropHint: {
+    position: 'absolute',
+    top: -30,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  cropHintText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   processingContainer: {
     flex: 1,

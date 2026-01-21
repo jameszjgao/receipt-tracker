@@ -33,6 +33,19 @@ export interface PaymentAccount {
   updatedAt?: string;
 }
 
+// 商家
+export interface Store {
+  id: string;
+  householdId: string;
+  name: string;
+  taxNumber?: string; // 税号
+  phone?: string; // 电话
+  address?: string; // 地址
+  isAiRecognized: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 // 小票商品项
 export interface ReceiptItem {
   id?: string;
@@ -51,6 +64,8 @@ export interface Receipt {
   id?: string;
   householdId: string;
   storeName: string;
+  storeId?: string; // 关联的商家ID
+  store?: Store; // 关联的商家对象
   totalAmount: number;
   date: string;
   paymentAccountId?: string;
@@ -115,6 +130,11 @@ export interface DataConsistency {
 // Gemini识别结果（使用分类名称，后续会匹配到分类ID）
 export interface GeminiReceiptResult {
   storeName: string;
+  storeInfo?: {
+    taxNumber?: string; // 税号
+    phone?: string; // 电话
+    address?: string; // 地址
+  };
   date: string;
   totalAmount: number;
   currency?: string; // 币种，如：CNY、USD

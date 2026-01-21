@@ -30,21 +30,52 @@ export default function EmailConfirmScreen() {
       // 如果没有从查询参数获取到，尝试从 URL hash 中解析
       if (!token_hash && !access_token) {
         try {
+          // 先尝试获取当前 URL（如果应用已经打开）
           const url = await Linking.getInitialURL();
           if (url) {
+            console.log('Parsing URL:', url);
             const parsed = Linking.parse(url);
             // 检查 hash fragment（Supabase 通常在这里传递 access_token）
             if (parsed.fragment) {
               const fragmentParams = new URLSearchParams(parsed.fragment);
               access_token = fragmentParams.get('access_token') || undefined;
               type = (fragmentParams.get('type') || type) as any;
+              console.log('Found in fragment:', { access_token: access_token ? 'present' : 'missing', type });
             }
             // 也检查查询参数
             if (parsed.queryParams) {
               token_hash = (parsed.queryParams.token_hash as string) || token_hash;
               type = ((parsed.queryParams.type as string) || type) as any;
               access_token = (parsed.queryParams.access_token as string) || access_token;
+              console.log('Found in queryParams:', { token_hash: token_hash ? 'present' : 'missing', type });
             }
+          }
+          
+          // 如果还是没有，尝试监听 URL 变化（适用于应用已打开的情况）
+          if (!token_hash && !access_token) {
+            const subscription = Linking.addEventListener('url', (event) => {
+              console.log('URL event received:', event.url);
+              const parsed = Linking.parse(event.url);
+              if (parsed.fragment) {
+                const fragmentParams = new URLSearchParams(parsed.fragment);
+                access_token = fragmentParams.get('access_token') || undefined;
+                type = (fragmentParams.get('type') || type) as any;
+              }
+              if (parsed.queryParams) {
+                token_hash = (parsed.queryParams.token_hash as string) || token_hash;
+                type = ((parsed.queryParams.type as string) || type) as any;
+                access_token = (parsed.queryParams.access_token as string) || access_token;
+              }
+              subscription.remove();
+              if (access_token || token_hash) {
+                handleEmailConfirmation();
+              }
+            });
+            
+            // 等待一小段时间让 URL 事件触发
+            setTimeout(() => {
+              subscription.remove();
+            }, 2000);
           }
         } catch (linkError) {
           console.log('Error parsing URL:', linkError);
@@ -55,8 +86,15 @@ export default function EmailConfirmScreen() {
       if (access_token) {
         try {
           // 尝试从当前 URL 获取完整的 hash fragment
-          const url = await Linking.getInitialURL();
+          let url = await Linking.getInitialURL();
+          if (!url) {
+            // 如果 getInitialURL 返回 null，尝试等待一下再获取
+            await new Promise(resolve => setTimeout(resolve, 500));
+            url = await Linking.getInitialURL();
+          }
+          
           if (url) {
+            console.log('Processing URL with access_token:', url);
             const parsed = Linking.parse(url);
             const hashFragment = parsed.fragment;
             
@@ -66,6 +104,10 @@ export default function EmailConfirmScreen() {
               const fragmentParams = new URLSearchParams(hashFragment);
               refresh_token = fragmentParams.get('refresh_token') || undefined;
               type = (fragmentParams.get('type') || type) as any;
+              console.log('Extracted from fragment:', { 
+                hasRefreshToken: !!refresh_token, 
+                type 
+              });
             }
 
             // 使用 access_token 和 refresh_token 设置 session
@@ -76,10 +118,12 @@ export default function EmailConfirmScreen() {
               });
 
               if (sessionError) {
+                console.error('Session error:', sessionError);
                 throw sessionError;
               }
 
               if (sessionData?.user) {
+                console.log('Session set successfully for user:', sessionData.user.id);
                 // Session 设置成功，确保 users 表中有用户记录
                 await ensureUserRecord(sessionData.user);
                 
@@ -94,17 +138,26 @@ export default function EmailConfirmScreen() {
                 // 如果是密码重置，跳转到设置新密码页面；否则跳转到登录页
                 setTimeout(() => {
                   if (isPasswordReset) {
+                    console.log('Redirecting to set-password');
                     router.replace('/set-password');
                   } else {
+                    console.log('Redirecting to login');
                     router.replace('/login');
                   }
-                }, 2000);
+                }, 1500);
                 return;
+              } else {
+                console.error('Session data missing user');
               }
+            } else {
+              console.error('Refresh token missing from URL fragment');
             }
+          } else {
+            console.error('Could not get URL for session setup');
           }
         } catch (sessionError) {
           console.error('Error setting session:', sessionError);
+          // 即使 session 设置失败，也尝试继续处理
         }
       }
 
@@ -155,16 +208,43 @@ export default function EmailConfirmScreen() {
         // 等待一小段时间后再试
         setTimeout(async () => {
           const url = await Linking.getInitialURL();
+          console.log('Retry URL check:', url);
           if (url && (url.includes('access_token') || url.includes('token_hash'))) {
-            handleEmailConfirmation();
-          } else {
-            setStatus('error');
-            setMessage('Invalid confirmation link. Please check your email and try again.');
-            setTimeout(() => {
-              router.replace('/login');
-            }, 3000);
+            // 重新解析 URL
+            const parsed = Linking.parse(url);
+            let retryTokenHash: string | undefined;
+            let retryType: any;
+            let retryAccessToken: string | undefined;
+            
+            if (parsed.fragment) {
+              const fragmentParams = new URLSearchParams(parsed.fragment);
+              retryAccessToken = fragmentParams.get('access_token') || undefined;
+              retryType = fragmentParams.get('type') || type;
+            }
+            if (parsed.queryParams) {
+              retryTokenHash = (parsed.queryParams.token_hash as string) || undefined;
+              retryType = (parsed.queryParams.type as string) || retryType || type;
+              retryAccessToken = (parsed.queryParams.access_token as string) || retryAccessToken;
+            }
+            
+            // 如果找到了参数，更新变量并重新处理
+            if (retryAccessToken || retryTokenHash) {
+              token_hash = retryTokenHash;
+              access_token = retryAccessToken;
+              type = retryType;
+              // 重新执行处理逻辑
+              handleEmailConfirmation();
+              return;
+            }
           }
-        }, 1000);
+          
+          // 如果还是没有找到参数，显示错误
+          setStatus('error');
+          setMessage('Invalid confirmation link. Please check your email and try again.');
+          setTimeout(() => {
+            router.replace('/login');
+          }, 3000);
+        }, 1500);
         return;
       }
 

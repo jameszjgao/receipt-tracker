@@ -248,7 +248,7 @@ async function sendInvitationEmail(
                   process.env.NODE_ENV === 'development';
     const baseUrl = isDev 
       ? 'exp://localhost:8081' // 开发环境
-      : 'voucap://'; // 生产环境
+      : 'vouchap://'; // 生产环境
 
     const inviteUrl = `${baseUrl}/invite/${invitationId}`;
 

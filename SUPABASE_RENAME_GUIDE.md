@@ -1,6 +1,6 @@
 # Supabase 应用名称更换指南
 
-本指南说明如何将 Supabase 项目中的配置从 "Snap Receipt" 更新为 "VouCap"。
+本指南说明如何将 Supabase 项目中的配置从 "Snap Receipt" 更新为 "Vouchap"。
 
 ## 📋 需要更新的配置项
 
@@ -11,12 +11,12 @@
 **位置**：Supabase Dashboard > Authentication > Email Templates > Confirm signup
 
 **需要更新的内容**：
-- **Subject（主题）**：将 "Snap Receipt" 替换为 "VouCap"
-- **Email Body（邮件正文）**：将所有 "Snap Receipt" 替换为 "VouCap"
+- **Subject（主题）**：将 "Snap Receipt" 替换为 "Vouchap"
+- **Email Body（邮件正文）**：将所有 "Snap Receipt" 替换为 "Vouchap"
 
 **示例**：
 ```
-Subject: 确认您的 VouCap 账户
+Subject: 确认您的 Vouchap 账户
 
 确认您的账户，请点击以下链接：
 {{ .ConfirmationURL }}
@@ -27,12 +27,12 @@ Subject: 确认您的 VouCap 账户
 **位置**：Supabase Dashboard > Authentication > Email Templates > Reset password
 
 **需要更新的内容**：
-- **Subject（主题）**：将 "Snap Receipt" 替换为 "VouCap"
-- **Email Body（邮件正文）**：将所有 "Snap Receipt" 替换为 "VouCap"
+- **Subject（主题）**：将 "Snap Receipt" 替换为 "Vouchap"
+- **Email Body（邮件正文）**：将所有 "Snap Receipt" 替换为 "Vouchap"
 
 **示例**：
 ```
-Subject: 重置您的 VouCap 密码
+Subject: 重置您的 Vouchap 密码
 
 重置您的密码，请点击以下链接：
 {{ .ConfirmationURL }}
@@ -43,30 +43,30 @@ Subject: 重置您的 VouCap 密码
 **位置**：Supabase Dashboard > Authentication > Email Templates > Invite user
 
 **需要更新的内容**：
-- **Subject（主题）**：将 "Snap Receipt" 替换为 "VouCap"
-- **Email Body（邮件正文）**：将所有 "Snap Receipt" 替换为 "VouCap"
+- **Subject（主题）**：将 "Snap Receipt" 替换为 "Vouchap"
+- **Email Body（邮件正文）**：将所有 "Snap Receipt" 替换为 "Vouchap"
 
 #### 1.4 更换邮箱确认邮件模板
 
 **位置**：Supabase Dashboard > Authentication > Email Templates > Change email address
 
 **需要更新的内容**：
-- **Subject（主题）**：将 "Snap Receipt" 替换为 "VouCap"
-- **Email Body（邮件正文）**：将所有 "Snap Receipt" 替换为 "VouCap"
+- **Subject（主题）**：将 "Snap Receipt" 替换为 "Vouchap"
+- **Email Body（邮件正文）**：将所有 "Snap Receipt" 替换为 "Vouchap"
 
 ### 2. 重定向 URL 配置
 
 **位置**：Supabase Dashboard > Authentication > URL Configuration
 
 **需要更新的配置**：
-- **Site URL**：确保设置为正确的生产域名（如 `https://voucap.app`）
-- **Redirect URLs**：检查并更新所有重定向 URL，确保使用新的 scheme `voucap://`
+- **Site URL**：确保设置为正确的生产域名（如 `https://vouchap.app`）
+- **Redirect URLs**：检查并更新所有重定向 URL，确保使用新的 scheme `vouchap://`
 
 **重定向 URL 示例**：
 ```
 生产环境：
-- voucap://auth/confirm
-- voucap://invite/[id]
+- vouchap://auth/confirm
+- vouchap://invite/[id]
 
 开发环境（如果需要）：
 - exp://localhost:8081/--/auth/confirm
@@ -78,14 +78,14 @@ Subject: 重置您的 VouCap 密码
 **位置**：Supabase Dashboard > Authentication > Settings
 
 **可选的更新项**：
-- **Email From Name**：将 "Snap Receipt" 更新为 "VouCap"
-- **Email From Address**：如果使用自定义邮箱，可能需要更新（如 `noreply@voucap.app`）
+- **Email From Name**：将 "Snap Receipt" 更新为 "Vouchap"
+- **Email From Address**：如果使用自定义邮箱，可能需要更新（如 `noreply@vouchap.app`）
 
 ### 4. 网站元数据（如果使用）
 
 **位置**：Supabase Dashboard > Settings > General
 
-如果项目描述或元数据中包含应用名称，可以更新为 "VouCap"。
+如果项目描述或元数据中包含应用名称，可以更新为 "Vouchap"。
 
 ## 🔄 邮件模板变量说明
 
@@ -106,14 +106,14 @@ Supabase 邮件模板支持以下变量（根据模板类型而定）：
 2. 进入 **Authentication** > **Email Templates**
 3. 选择 **Confirm signup** 模板
 4. 点击 **Edit** 按钮
-5. 更新 Subject 和 Email Body 中的所有 "Snap Receipt" 为 "VouCap"
+5. 更新 Subject 和 Email Body 中的所有 "Snap Receipt" 为 "Vouchap"
 6. 点击 **Save** 保存
 
 ### 步骤 2：更新密码重置邮件模板
 
 1. 在 **Email Templates** 页面选择 **Reset password** 模板
 2. 点击 **Edit** 按钮
-3. 更新 Subject 和 Email Body 中的所有 "Snap Receipt" 为 "VouCap"
+3. 更新 Subject 和 Email Body 中的所有 "Snap Receipt" 为 "Vouchap"
 4. 点击 **Save** 保存
 
 ### 步骤 3：更新其他邮件模板（如适用）
@@ -128,8 +128,8 @@ Supabase 邮件模板支持以下变量（根据模板类型而定）：
 2. 检查 **Redirect URLs** 列表
 3. 确保包含以下 URL（根据实际需求）：
    ```
-   voucap://auth/confirm
-   voucap://invite/*
+   vouchap://auth/confirm
+   vouchap://invite/*
    ```
 4. 如果缺少，点击 **Add URL** 添加
 5. 点击 **Save** 保存
@@ -146,10 +146,10 @@ Supabase 邮件模板支持以下变量（根据模板类型而定）：
 
 ### 1. Deep Link Scheme 变更
 
-如果更改了应用 scheme（从 `snapreceipt://` 改为 `voucap://`），需要：
+如果更改了应用 scheme（从 `snapreceipt://` 改为 `vouchap://`），需要：
 
 - **iOS**：
-  - 更新 Associated Domains（`applinks:voucap.app`）
+  - 更新 Associated Domains（`applinks:vouchap.app`）
   - 重新构建和发布应用
   - 更新 Universal Links 配置
 
@@ -186,9 +186,9 @@ Supabase 邮件模板支持以下变量（根据模板类型而定）：
 
 完成以下检查以确保配置正确：
 
-- [ ] 所有邮件模板中的名称已更新为 "VouCap"
+- [ ] 所有邮件模板中的名称已更新为 "Vouchap"
 - [ ] 邮件主题和正文中的品牌名称正确
-- [ ] 重定向 URL 配置正确（使用 `voucap://`）
+- [ ] 重定向 URL 配置正确（使用 `vouchap://`）
 - [ ] 测试邮箱确认邮件发送成功
 - [ ] 测试密码重置邮件发送成功
 - [ ] 邮件中的链接能正常跳转到应用

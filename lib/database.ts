@@ -3,6 +3,46 @@ import { Receipt, ReceiptItem, ReceiptStatus } from '@/types';
 import { getCurrentUser } from './auth';
 import { findCategoryByName } from './categories';
 import { findOrCreatePaymentAccount } from './payment-accounts';
+import { findOrCreateStore } from './stores';
+
+// 将日期数据转换为 YYYY-MM-DD 格式的字符串，完全忠实于票面日期，不做任何时区转换
+function normalizeDate(dateValue: any): string {
+  if (!dateValue) {
+    // 如果日期为空，返回今天的日期（使用本地时区）
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  
+  // 优先处理字符串，因为这是数据库 DATE 字段的原始格式
+  if (typeof dateValue === 'string') {
+    // 如果是 ISO 字符串（如 "2024-01-15T00:00:00Z"），只取日期部分，不进行时区转换
+    if (dateValue.includes('T')) {
+      return dateValue.split('T')[0];
+    }
+    // 如果已经是 YYYY-MM-DD 格式，直接返回，不做任何转换
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+      return dateValue;
+    }
+  }
+  
+  // 如果是 Date 对象，需要小心处理时区问题
+  // 为了避免时区转换问题，我们使用 UTC 方法而不是本地时区方法
+  // 这样可以确保日期与数据库存储的日期一致
+  if (dateValue instanceof Date) {
+    // 使用 UTC 方法，确保与数据库 DATE 字段的存储方式一致
+    // PostgreSQL DATE 类型不包含时区信息，总是按字面值存储
+    const year = dateValue.getUTCFullYear();
+    const month = String(dateValue.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(dateValue.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  
+  // 其他情况，尝试转换为字符串
+  return String(dateValue);
+}
 
 // 保存小票到数据库
 export async function saveReceipt(receipt: Receipt): Promise<string> {
@@ -20,6 +60,31 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
       throw new Error('User not associated with household account, please sign in again');
     }
 
+    // 处理商家ID（排除无效的商家名称，如 "Processing..." 等）
+    let storeId = receipt.storeId;
+    if (!storeId && receipt.storeName) {
+      const trimmedStoreName = receipt.storeName.trim();
+      // 排除处理状态等无效名称
+      const invalidNames = ['processing', 'processing...', 'pending', 'pending...', 'loading', 'loading...', '识别中', '处理中', '待处理'];
+      const isValidName = !invalidNames.includes(trimmedStoreName.toLowerCase());
+      
+      if (isValidName) {
+        try {
+          // 如果没有 storeId 但有 storeName，尝试查找或创建商家
+          const store = await findOrCreateStore(trimmedStoreName, true);
+          storeId = store.id;
+        } catch (error) {
+          console.warn('Failed to create or find store:', error);
+          // 如果商家创建失败，继续处理其他信息，不阻塞整个流程
+        }
+      } else {
+        console.warn(`Skipping invalid store name: "${trimmedStoreName}"`);
+      }
+    } else if (!storeId && receipt.store) {
+      // 如果有 store 对象，使用其 ID
+      storeId = receipt.store.id;
+    }
+
     // 处理支付账户ID
     let paymentAccountId = receipt.paymentAccountId;
     if (!paymentAccountId && receipt.paymentAccount) {
@@ -33,6 +98,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
       .insert({
         household_id: householdId,
         store_name: receipt.storeName,
+        store_id: storeId,
         total_amount: receipt.totalAmount,
         currency: receipt.currency,
         tax: receipt.tax,
@@ -186,6 +252,31 @@ export async function updateReceipt(receiptId: string, receipt: Partial<Receipt>
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
+    // 处理商家ID（排除无效的商家名称，如 "Processing..." 等）
+    let storeId = receipt.storeId;
+    if (receipt.storeName && !storeId) {
+      const trimmedStoreName = receipt.storeName.trim();
+      // 排除处理状态等无效名称
+      const invalidNames = ['processing', 'processing...', 'pending', 'pending...', 'loading', 'loading...', '识别中', '处理中', '待处理'];
+      const isValidName = !invalidNames.includes(trimmedStoreName.toLowerCase());
+      
+      if (isValidName) {
+        try {
+          // 如果更新了 storeName 但没有 storeId，尝试查找或创建商家
+          const store = await findOrCreateStore(trimmedStoreName, true);
+          storeId = store.id;
+        } catch (error) {
+          console.warn('Failed to create or find store:', error);
+          // 如果商家创建失败，继续处理其他信息，不阻塞整个流程
+        }
+      } else {
+        console.warn(`Skipping invalid store name: "${trimmedStoreName}"`);
+      }
+    } else if (receipt.store && !storeId) {
+      // 如果有 store 对象，使用其 ID
+      storeId = receipt.store.id;
+    }
+
     // 处理支付账户ID
     let paymentAccountId = receipt.paymentAccountId;
     if (!paymentAccountId && receipt.paymentAccount) {
@@ -196,6 +287,7 @@ export async function updateReceipt(receiptId: string, receipt: Partial<Receipt>
     // 更新小票主记录
     const updateData: any = {};
     if (receipt.storeName !== undefined) updateData.store_name = receipt.storeName;
+    if (storeId !== undefined) updateData.store_id = storeId;
     if (receipt.totalAmount !== undefined) updateData.total_amount = receipt.totalAmount;
     if (receipt.currency !== undefined) updateData.currency = receipt.currency;
     if (receipt.tax !== undefined) updateData.tax = receipt.tax;
@@ -278,6 +370,7 @@ export async function getAllReceipts(): Promise<Receipt[]> {
       .from('receipts')
       .select(`
         *,
+        stores (*),
         payment_accounts (*),
         created_by_user:users!created_by (
           id,
@@ -301,10 +394,22 @@ export async function getAllReceipts(): Promise<Receipt[]> {
       id: row.id,
       householdId: row.household_id,
       storeName: row.store_name,
+      storeId: row.store_id,
+      store: row.stores ? {
+        id: row.stores.id,
+        householdId: row.stores.household_id,
+        name: row.stores.name,
+        taxNumber: row.stores.tax_number,
+        phone: row.stores.phone,
+        address: row.stores.address,
+        isAiRecognized: row.stores.is_ai_recognized,
+        createdAt: row.stores.created_at,
+        updatedAt: row.stores.updated_at,
+      } : undefined,
       totalAmount: row.total_amount,
       currency: row.currency,
       tax: row.tax,
-      date: row.date,
+      date: normalizeDate(row.date),
       paymentAccountId: row.payment_account_id,
       paymentAccount: row.payment_accounts ? {
         id: row.payment_accounts.id,
@@ -462,6 +567,7 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
       .from('receipts')
       .select(`
         *,
+        stores (*),
         payment_accounts (*),
         created_by_user:users!created_by (
           id,
@@ -490,10 +596,22 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
       id: data.id,
       householdId: data.household_id,
       storeName: data.store_name,
+      storeId: data.store_id,
+      store: data.stores ? {
+        id: data.stores.id,
+        householdId: data.stores.household_id,
+        name: data.stores.name,
+        taxNumber: data.stores.tax_number,
+        phone: data.stores.phone,
+        address: data.stores.address,
+        isAiRecognized: data.stores.is_ai_recognized,
+        createdAt: data.stores.created_at,
+        updatedAt: data.stores.updated_at,
+      } : undefined,
       totalAmount: data.total_amount,
       currency: data.currency,
       tax: data.tax,
-      date: data.date,
+      date: normalizeDate(data.date),
       paymentAccountId: data.payment_account_id,
       paymentAccount: data.payment_accounts ? {
         id: data.payment_accounts.id,

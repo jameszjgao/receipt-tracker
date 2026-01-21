@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -28,6 +28,9 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showEmailConfirmationModal, setShowEmailConfirmationModal] = useState(false);
+  const emailInputRef = useRef<TextInput>(null);
+  const passwordInputRef = useRef<TextInput>(null);
+  const confirmPasswordInputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     if (params.email) {
@@ -141,7 +144,7 @@ export default function RegisterScreen() {
             </View>
           </View>
           <Text style={styles.title}>Create Account</Text>
-          <Text style={styles.subtitle}>Start your voucher tracking journey</Text>
+          <Text style={styles.subtitle}>Start your receipt tracking journey</Text>
         </View>
 
         <View style={styles.form}>
@@ -156,12 +159,20 @@ export default function RegisterScreen() {
               autoCapitalize="words"
               autoComplete="name"
               textContentType="name"
+              autoCorrect={false}
+              returnKeyType="next"
+              onSubmitEditing={() => {
+                emailInputRef.current?.focus();
+              }}
+              accessibilityLabel="Your name"
+              editable={!loading}
             />
           </View>
 
           <View style={styles.inputContainer}>
             <Ionicons name="mail-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
+              ref={emailInputRef}
               style={styles.input}
               placeholder="Email *"
               placeholderTextColor="#95A5A6"
@@ -169,8 +180,15 @@ export default function RegisterScreen() {
               onChangeText={setEmail}
               autoCapitalize="none"
               keyboardType="email-address"
-              autoComplete="email"
-              textContentType="emailAddress"
+              autoComplete="username"
+              textContentType="username"
+              autoCorrect={false}
+              returnKeyType="next"
+              onSubmitEditing={() => {
+                passwordInputRef.current?.focus();
+              }}
+              accessibilityLabel="Email address"
+              editable={!loading}
             />
           </View>
 
@@ -178,6 +196,7 @@ export default function RegisterScreen() {
           <View style={styles.inputContainer}>
             <Ionicons name="lock-closed-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
+              ref={passwordInputRef}
               style={styles.input}
               placeholder="Password *"
               placeholderTextColor="#95A5A6"
@@ -188,10 +207,19 @@ export default function RegisterScreen() {
               autoComplete="password-new"
               textContentType="newPassword"
               passwordRules="minlength: 6;"
+              autoCorrect={false}
+              returnKeyType="next"
+              onSubmitEditing={() => {
+                confirmPasswordInputRef.current?.focus();
+              }}
+              accessibilityLabel="Password"
+              editable={!loading}
             />
             <TouchableOpacity
               onPress={() => setShowPassword(!showPassword)}
               style={styles.eyeIcon}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel={showPassword ? "Hide password" : "Show password"}
             >
               <Ionicons
                 name={showPassword ? 'eye-outline' : 'eye-off-outline'}
@@ -204,6 +232,7 @@ export default function RegisterScreen() {
           <View style={styles.inputContainer}>
             <Ionicons name="lock-closed-outline" size={20} color="#636E72" style={styles.inputIcon} />
             <TextInput
+              ref={confirmPasswordInputRef}
               style={styles.input}
               placeholder="Confirm Password *"
               placeholderTextColor="#95A5A6"
@@ -211,12 +240,19 @@ export default function RegisterScreen() {
               onChangeText={setConfirmPassword}
               secureTextEntry={!showConfirmPassword}
               autoCapitalize="none"
-              autoComplete="password"
+              autoComplete="password-new"
               textContentType="newPassword"
+              autoCorrect={false}
+              returnKeyType="done"
+              onSubmitEditing={handleRegister}
+              accessibilityLabel="Confirm password"
+              editable={!loading}
             />
             <TouchableOpacity
               onPress={() => setShowConfirmPassword(!showConfirmPassword)}
               style={styles.eyeIcon}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel={showConfirmPassword ? "Hide password" : "Show password"}
             >
               <Ionicons
                 name={showConfirmPassword ? 'eye-outline' : 'eye-off-outline'}
@@ -268,7 +304,7 @@ export default function RegisterScreen() {
             </View>
             <Text style={styles.modalTitle}>Check Your Email</Text>
             <Text style={styles.modalMessage}>
-              You're just one step away from getting organized on Snap Receipt.
+              You're just one step away from getting organized on Vouchap.
             </Text>
             <Text style={styles.modalSubMessage}>
               Please check the email you received to verify your account.
@@ -351,6 +387,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E9ECEF',
     minHeight: 52,
+    // 优化触摸响应
+    justifyContent: 'flex-start',
   },
   inputIcon: {
     marginRight: 12,
@@ -361,6 +399,9 @@ const styles = StyleSheet.create({
     color: '#2D3436',
     paddingVertical: 0,
     minHeight: 24,
+    // 优化输入响应性
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   eyeIcon: {
     padding: 4,

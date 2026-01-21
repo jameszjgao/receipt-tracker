@@ -138,3 +138,48 @@ export function getReceiptImageUrl(filePath: string): string {
   return publicUrl;
 }
 
+// 从公共URL中提取文件路径
+function extractFilePathFromUrl(url: string): string | null {
+  try {
+    // URL 格式通常是: https://[project].supabase.co/storage/v1/object/public/receipts/[filename]
+    // 或者: https://[project].supabase.co/storage/v1/object/sign/receipts/[filename]?token=...
+    const urlObj = new URL(url);
+    const pathParts = urlObj.pathname.split('/');
+    const bucketIndex = pathParts.indexOf(STORAGE_BUCKET);
+    if (bucketIndex !== -1 && bucketIndex + 1 < pathParts.length) {
+      // 提取 bucket 后面的所有路径部分（文件名可能包含目录结构）
+      const fileName = pathParts.slice(bucketIndex + 1).join('/');
+      return fileName;
+    }
+    return null;
+  } catch (error) {
+    console.error('Error extracting file path from URL:', error);
+    return null;
+  }
+}
+
+// 删除Supabase Storage中的文件
+export async function deleteReceiptImage(imageUrl: string): Promise<void> {
+  try {
+    const filePath = extractFilePathFromUrl(imageUrl);
+    if (!filePath) {
+      console.warn('Could not extract file path from URL:', imageUrl);
+      return;
+    }
+
+    console.log(`Deleting file from bucket: ${STORAGE_BUCKET}, path: ${filePath}`);
+    const { error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .remove([filePath]);
+
+    if (error) {
+      console.error('Error deleting file:', error);
+      // 不抛出错误，因为删除失败不应该影响主流程
+    } else {
+      console.log('File deleted successfully:', filePath);
+    }
+  } catch (error) {
+    console.error('Error deleting image:', error);
+    // 不抛出错误，因为删除失败不应该影响主流程
+  }
+}

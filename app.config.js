@@ -1,12 +1,12 @@
 export default {
   expo: {
-    name: "VouCap",
-    slug: "voucap",
-    version: "1.3.0",
+    name: "Vouchap",
+    slug: "vouchap",
+    version: "1.4.0",
     owner: "aimlink",
     orientation: "portrait",
     icon: "./assets/icon.png",
-    scheme: "voucap", // 关键：解决邮件跳转的核心配置
+    scheme: "vouchap", // 关键：解决邮件跳转的核心配置
     userInterfaceStyle: "light",
     splash: {
       backgroundColor: "#ffffff",
@@ -15,11 +15,11 @@ export default {
     assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.voucap.app",
-      associatedDomains: ["applinks:voucap.app"]
+      bundleIdentifier: "com.vouchap.app",
+      associatedDomains: ["applinks:vouchap.app"]
     },
     android: {
-      package: "com.voucap.app",
+      package: "com.vouchap.app",
       versionCode: 5,
       permissions: [
         "CAMERA",
@@ -40,11 +40,11 @@ export default {
           data: [
             {
               scheme: "https",
-              host: "voucap.app",
+              host: "vouchap.app",
               pathPrefix: "/"
             },
             {
-              scheme: "voucap" // 允许通过 voucap:// 唤起
+              scheme: "vouchap" // 允许通过 vouchap:// 唤起
             }
           ],
           category: ["BROWSABLE", "DEFAULT"]
@@ -55,16 +55,16 @@ export default {
       [
         "expo-image-picker",
         {
-          "photosPermission": "VouCap needs access to your photo library.",
-          "cameraPermission": "VouCap needs access to your camera."
+          "photosPermission": "Vouchap needs access to your photo library.",
+          "cameraPermission": "Vouchap needs access to your camera."
         }
       ],
-      ["expo-camera", { "cameraPermission": "VouCap needs access to your camera." }]
+      ["expo-camera", { "cameraPermission": "Vouchap needs access to your camera." }]
     ],
     // 这里通过扩展运算符引入 app.json 中的 projectId，保持同步
     extra: {
       eas: {
-        projectId: "ab9f28b4-7d21-45e4-8c82-5d8cabfb2583"
+        projectId: "f98c5cea-fd51-41e3-9c9c-1512c6b1a8e7"
       }
     }
   }
