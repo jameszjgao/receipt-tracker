@@ -15,7 +15,7 @@ function normalizeDate(dateValue: any): string {
     const day = String(today.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   }
-  
+
   // 优先处理字符串，因为这是数据库 DATE 字段的原始格式
   if (typeof dateValue === 'string') {
     // 如果是 ISO 字符串（如 "2024-01-15T00:00:00Z"），只取日期部分，不进行时区转换
@@ -27,7 +27,7 @@ function normalizeDate(dateValue: any): string {
       return dateValue;
     }
   }
-  
+
   // 如果是 Date 对象，需要小心处理时区问题
   // 为了避免时区转换问题，我们使用 UTC 方法而不是本地时区方法
   // 这样可以确保日期与数据库存储的日期一致
@@ -39,7 +39,7 @@ function normalizeDate(dateValue: any): string {
     const day = String(dateValue.getUTCDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   }
-  
+
   // 其他情况，尝试转换为字符串
   return String(dateValue);
 }
@@ -52,7 +52,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
       console.error('User not logged in when trying to save receipt');
       throw new Error('Not logged in: Please sign in before saving receipt');
     }
-    
+
     // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
     const householdId = user.currentHouseholdId || user.householdId;
     if (!householdId) {
@@ -67,7 +67,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
       // 排除处理状态等无效名称
       const invalidNames = ['processing', 'processing...', 'pending', 'pending...', 'loading', 'loading...', '识别中', '处理中', '待处理'];
       const isValidName = !invalidNames.includes(trimmedStoreName.toLowerCase());
-      
+
       if (isValidName) {
         try {
           // 如果没有 storeId 但有 storeName，尝试查找或创建商家
@@ -126,7 +126,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
         total_amount: receipt.totalAmount,
         date: receipt.date,
       });
-      
+
       if (receiptError.message?.includes('row-level security') || receiptError.code === '42501') {
         throw new Error(
           'Database permission error: Unable to save receipt\n\n' +
@@ -153,7 +153,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
 
       for (const item of receipt.items) {
         let categoryId: string | null | undefined = item.categoryId;
-        
+
         // 如果没有categoryId但有category对象，使用category.id
         if (!categoryId && item.category) {
           categoryId = item.category.id;
@@ -168,16 +168,16 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
         if (!categoryId) {
           // 如果仍然找不到，尝试获取默认分类
           console.warn(`商品 "${item.name}" 的分类未找到，使用默认分类`);
-          
+
           // 尝试按优先级查找默认分类
           const defaultCategoryNames = ['购物', '食品', 'Other', 'Grocery'];
           let defaultCategory = null;
-          
+
           for (const defaultName of defaultCategoryNames) {
             defaultCategory = await findCategoryByName(defaultName);
             if (defaultCategory) break;
           }
-          
+
           if (!defaultCategory) {
             // 如果都找不到，尝试获取第一个默认分类
             const { data: defaultCategories } = await supabase
@@ -186,7 +186,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
               .eq('household_id', householdId)
               .eq('is_default', true)
               .limit(1);
-            
+
             if (!defaultCategories || defaultCategories.length === 0) {
               // 如果连默认分类都没有，尝试获取任何第一个分类
               const { data: anyCategories } = await supabase
@@ -194,7 +194,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
                 .select('id')
                 .eq('household_id', householdId)
                 .limit(1);
-              
+
               if (!anyCategories || anyCategories.length === 0) {
                 throw new Error(
                   'No categories found.\n\n' +
@@ -259,7 +259,7 @@ export async function updateReceipt(receiptId: string, receipt: Partial<Receipt>
       // 排除处理状态等无效名称
       const invalidNames = ['processing', 'processing...', 'pending', 'pending...', 'loading', 'loading...', '识别中', '处理中', '待处理'];
       const isValidName = !invalidNames.includes(trimmedStoreName.toLowerCase());
-      
+
       if (isValidName) {
         try {
           // 如果更新了 storeName 但没有 storeId，尝试查找或创建商家
@@ -676,7 +676,7 @@ export async function deleteReceipt(receiptId: string): Promise<void> {
 
     // 先获取小票信息，以便删除关联的图片
     const receipt = await getReceiptById(receiptId);
-    
+
     // 删除关联的图片
     if (receipt?.imageUrl) {
       try {
@@ -684,17 +684,17 @@ export async function deleteReceipt(receiptId: string): Promise<void> {
         // imageUrl 格式通常是：https://xxx.supabase.co/storage/v1/object/public/receipts/filename.ext
         // 或者：https://xxx.supabase.co/storage/v1/object/sign/receipts/filename.ext?token=...
         let filePaths: string[] = [];
-        
+
         // 尝试从 URL 中提取文件名
         const urlParts = receipt.imageUrl.split('/');
         const lastPart = urlParts[urlParts.length - 1];
         // 移除查询参数（如果有）
         const fileName = lastPart.split('?')[0];
-        
+
         if (fileName && fileName.length > 0) {
           filePaths.push(fileName);
         }
-        
+
         // 同时尝试使用 receiptId 构建可能的文件名（作为备选）
         // 尝试常见的图片扩展名
         const extensions = ['jpg', 'jpeg', 'png', 'webp'];
@@ -704,13 +704,13 @@ export async function deleteReceipt(receiptId: string): Promise<void> {
             filePaths.push(testPath);
           }
         }
-        
+
         // 尝试删除所有可能的文件路径（remove 方法会忽略不存在的文件）
         if (filePaths.length > 0) {
           const { error: storageError } = await supabase.storage
             .from('receipts')
             .remove(filePaths);
-          
+
           if (storageError) {
             console.warn('Failed to delete image from storage:', storageError);
             // 不抛出错误，继续删除小票记录

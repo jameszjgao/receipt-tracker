@@ -1,12 +1,19 @@
 import { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, ActivityIndicator, Alert, ScrollView, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, ActivityIndicator, Alert, ScrollView, TextInput, Dimensions } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import DocumentScanner from 'react-native-document-scanner-plugin';
+import Constants from 'expo-constants';
 import { isAuthenticated, getCurrentUser, getCurrentHousehold, setCurrentHousehold, getUserHouseholds, createHousehold } from '@/lib/auth';
 import { initializeAuthCache, isCacheInitialized } from '@/lib/auth-cache';
 import { Household, UserHousehold } from '@/types';
 import { getPendingInvitationsForUser } from '@/lib/household-invitations';
+import { uploadReceiptImageTemp } from '@/lib/supabase';
+import { saveReceipt } from '@/lib/database';
+import { processReceiptInBackground } from '@/lib/receipt-processor';
+import { processImageForUpload } from '@/lib/image-processor';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -20,6 +27,11 @@ export default function HomeScreen() {
   const [newHouseholdAddress, setNewHouseholdAddress] = useState('');
   const [creating, setCreating] = useState(false);
   const [pendingInvitationsCount, setPendingInvitationsCount] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [capturedReceiptId, setCapturedReceiptId] = useState<string | null>(null);
+  
+  // Check if running in Expo Go
+  const isExpoGo = Constants.appOwnership === 'expo';
 
   useEffect(() => {
     checkAuth();
@@ -400,6 +412,110 @@ export default function HomeScreen() {
     }
   };
 
+  const scanDocument = async () => {
+    // If we are in Expo Go, we can't use the native scanner
+    if (isExpoGo) {
+      Alert.alert(
+        'Development Build Required',
+        'Real-time edge detection and cropping requires a native development build. In Expo Go, please use the gallery picker option.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Pick from Gallery', onPress: pickImage }
+        ]
+      );
+      return;
+    }
+
+    try {
+      const { scannedImages } = await DocumentScanner.scanDocument({
+        maxNumDocuments: 1,
+        croppedImageQuality: 90,
+      });
+
+      if (scannedImages && scannedImages.length > 0) {
+        processCapturedImage(scannedImages[0]);
+      }
+    } catch (error) {
+      console.error('Document scan error:', error);
+      Alert.alert('Error', 'Failed to scan document. Please try again.');
+    }
+  };
+
+  const pickImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.9,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        processCapturedImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Image picker error:', error);
+      Alert.alert('Error', 'Failed to pick image.');
+    }
+  };
+
+  const processCapturedImage = async (imageUri: string) => {
+    try {
+      setIsProcessing(true);
+      console.log('Processing captured image:', imageUri);
+
+      // 1. Process image (compress, crop, etc)
+      const processedImageUri = await processImageForUpload(imageUri, {
+        autoCrop: true,
+        quality: 0.85
+      });
+      console.log('Image processed:', processedImageUri);
+
+      // 2. Upload to Supabase Storage (temp)
+      const tempFileName = `temp-${Date.now()}`;
+      const imageUrl = await uploadReceiptImageTemp(processedImageUri, tempFileName);
+      console.log('Image uploaded:', imageUrl);
+
+      // 3. Create receipt record
+      const today = new Date().toISOString().split('T')[0];
+      const receiptId = await saveReceipt({
+        householdId: '', // Will be auto-filled
+        storeName: 'Processing...',
+        totalAmount: 0,
+        date: today,
+        status: 'processing',
+        items: [],
+        imageUrl: imageUrl,
+      });
+      console.log('Receipt record created:', receiptId);
+
+      setIsProcessing(false);
+      setCapturedReceiptId(receiptId);
+
+      // 4. Background processing with Gemini
+      processReceiptInBackground(imageUrl, receiptId, processedImageUri)
+        .then(() => console.log('Background processing started'))
+        .catch(err => console.error('Background processing failed:', err));
+
+    } catch (error) {
+      setIsProcessing(false);
+      console.error('Processing error:', error);
+      Alert.alert('Error', 'Failed to process receipt.');
+    }
+  };
+
+  const handleCameraPress = () => {
+    // Show action sheet to choose between scan and pick from gallery
+    Alert.alert(
+      'Scan Receipt',
+      'Choose an option',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Scan Document', onPress: scanDocument },
+        { text: 'Pick from Gallery', onPress: pickImage }
+      ]
+    );
+  };
+
   if (isLoggedIn === null) {
     return (
       <View style={styles.container}>
@@ -462,8 +578,9 @@ export default function HomeScreen() {
         
         <TouchableOpacity 
           style={styles.iconContainer}
-          onPress={() => router.push('/camera')}
+          onPress={handleCameraPress}
           activeOpacity={0.8}
+          disabled={isProcessing}
         >
           <View style={styles.circle}>
             <Ionicons name="camera" size={80} color="#6C5CE7" />
@@ -561,6 +678,75 @@ export default function HomeScreen() {
             </View>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Processing Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={isProcessing}
+        onRequestClose={() => {}}
+      >
+        <View style={styles.processingModalOverlay}>
+          <View style={styles.processingModalContent}>
+            <ActivityIndicator size="large" color="#6C5CE7" />
+            <Text style={styles.processingModalText}>Processing receipt...</Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Success Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={capturedReceiptId !== null}
+        onRequestClose={() => setCapturedReceiptId(null)}
+      >
+        <View style={styles.successModalOverlay}>
+          <View style={styles.successModalContent}>
+            <View style={styles.successIconContainer}>
+              <Ionicons name="checkmark-circle" size={80} color="#00B894" />
+            </View>
+            <Text style={styles.successTitle}>Receipt Saved</Text>
+            <Text style={styles.successSubtitle}>Processing under way...</Text>
+
+            <View style={styles.successButtons}>
+              <TouchableOpacity
+                style={styles.successButton}
+                onPress={() => {
+                  setCapturedReceiptId(null);
+                  handleCameraPress();
+                }}
+              >
+                <Ionicons name="scan" size={24} color="#6C5CE7" />
+                <Text style={styles.successButtonText}>Scan Another</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.successButton}
+                onPress={() => {
+                  const receiptId = capturedReceiptId;
+                  setCapturedReceiptId(null);
+                  router.push(`/receipt-details/${receiptId}`);
+                }}
+              >
+                <Ionicons name="document-text" size={24} color="#6C5CE7" />
+                <Text style={styles.successButtonText}>View Details</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.successButton}
+                onPress={() => {
+                  setCapturedReceiptId(null);
+                  router.push('/receipts');
+                }}
+              >
+                <Ionicons name="list" size={24} color="#6C5CE7" />
+                <Text style={styles.successButtonText}>View List</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
 
       {/* Create Space Modal */}
@@ -947,6 +1133,74 @@ const styles = StyleSheet.create({
   },
   modalCloseButton: {
     padding: 4,
+  },
+  processingModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  processingModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 32,
+    alignItems: 'center',
+    minWidth: 200,
+  },
+  processingModalText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#2D3436',
+    fontWeight: '500',
+  },
+  successModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  successModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 400,
+  },
+  successIconContainer: {
+    marginBottom: 24,
+  },
+  successTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#2D3436',
+    marginBottom: 8,
+  },
+  successSubtitle: {
+    fontSize: 16,
+    color: '#636E72',
+    marginBottom: 32,
+  },
+  successButtons: {
+    width: '100%',
+    gap: 12,
+  },
+  successButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#6C5CE7',
+    gap: 12,
+  },
+  successButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6C5CE7',
   },
 });
 

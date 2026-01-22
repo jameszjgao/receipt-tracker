@@ -15,12 +15,18 @@ import {
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { getAllReceipts, deleteReceipt } from '@/lib/database';
+import * as ImagePicker from 'expo-image-picker';
+import DocumentScanner from 'react-native-document-scanner-plugin';
+import Constants from 'expo-constants';
+import { getAllReceipts, deleteReceipt, saveReceipt } from '@/lib/database';
 import { Receipt, ReceiptStatus } from '@/types';
 import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { getCurrentUser } from '@/lib/auth';
 import { SwipeableRow } from './SwipeableRow';
+import { uploadReceiptImageTemp } from '@/lib/supabase';
+import { processReceiptInBackground } from '@/lib/receipt-processor';
+import { processImageForUpload } from '@/lib/image-processor';
 
 // 分组类型：
 // - month: 按交易时间（票面日期）的月份分组
@@ -69,7 +75,11 @@ export default function ReceiptsScreen() {
   const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(new Set());
   const [selectedCreators, setSelectedCreators] = useState<Set<string>>(new Set());
   const [filterSubMenu, setFilterSubMenu] = useState<'main' | 'month' | 'recordDate' | 'account' | 'creator'>('main');
+  const [isProcessing, setIsProcessing] = useState(false);
   const router = useRouter();
+  
+  // Check if running in Expo Go
+  const isExpoGo = Constants.appOwnership === 'expo';
 
   const loadReceipts = useCallback(async () => {
     try {
@@ -83,6 +93,115 @@ export default function ReceiptsScreen() {
       setRefreshing(false);
     }
   }, []);
+
+  const scanDocument = async () => {
+    if (isExpoGo) {
+      Alert.alert(
+        'Development Build Required',
+        'Real-time edge detection and cropping requires a native development build. In Expo Go, please use the gallery picker option.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Pick from Gallery', onPress: pickImage }
+        ]
+      );
+      return;
+    }
+
+    try {
+      const { scannedImages } = await DocumentScanner.scanDocument({
+        maxNumDocuments: 1,
+        croppedImageQuality: 90,
+      });
+
+      if (scannedImages && scannedImages.length > 0) {
+        processCapturedImage(scannedImages[0]);
+      }
+    } catch (error) {
+      console.error('Document scan error:', error);
+      Alert.alert('Error', 'Failed to scan document. Please try again.');
+    }
+  };
+
+  const pickImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.9,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        processCapturedImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Image picker error:', error);
+      Alert.alert('Error', 'Failed to pick image.');
+    }
+  };
+
+  const processCapturedImage = async (imageUri: string) => {
+    try {
+      setIsProcessing(true);
+      console.log('Processing captured image:', imageUri);
+
+      const processedImageUri = await processImageForUpload(imageUri, {
+        autoCrop: true,
+        quality: 0.85
+      });
+      console.log('Image processed:', processedImageUri);
+
+      const tempFileName = `temp-${Date.now()}`;
+      const imageUrl = await uploadReceiptImageTemp(processedImageUri, tempFileName);
+      console.log('Image uploaded:', imageUrl);
+
+      const today = new Date().toISOString().split('T')[0];
+      const receiptId = await saveReceipt({
+        householdId: '',
+        storeName: 'Processing...',
+        totalAmount: 0,
+        date: today,
+        status: 'processing',
+        items: [],
+        imageUrl: imageUrl,
+      });
+      console.log('Receipt record created:', receiptId);
+
+      setIsProcessing(false);
+      
+      // Refresh receipts list
+      await loadReceipts();
+
+      // Background processing with Gemini
+      processReceiptInBackground(imageUrl, receiptId, processedImageUri)
+        .then(() => {
+          console.log('Background processing started');
+          // Refresh again after processing
+          loadReceipts();
+        })
+        .catch(err => console.error('Background processing failed:', err));
+
+      Alert.alert('Success', 'Receipt saved and processing...', [
+        { text: 'OK' },
+        { text: 'View Details', onPress: () => router.push(`/receipt-details/${receiptId}`) }
+      ]);
+    } catch (error) {
+      setIsProcessing(false);
+      console.error('Processing error:', error);
+      Alert.alert('Error', 'Failed to process receipt.');
+    }
+  };
+
+  const handleCameraPress = () => {
+    Alert.alert(
+      'Scan Receipt',
+      'Choose an option',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Scan Document', onPress: scanDocument },
+        { text: 'Pick from Gallery', onPress: pickImage }
+      ]
+    );
+  };
 
   // 设置 Supabase Realtime 订阅监听所有相关表的变化
   useEffect(() => {
@@ -865,10 +984,28 @@ export default function ReceiptsScreen() {
 
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => router.push('/camera')}
+        onPress={handleCameraPress}
+        disabled={isProcessing}
       >
         <Ionicons name="add" size={32} color="#fff" />
       </TouchableOpacity>
+
+      {/* Processing Modal */}
+      {isProcessing && (
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={isProcessing}
+          onRequestClose={() => {}}
+        >
+          <View style={styles.processingModalOverlay}>
+            <View style={styles.processingModalContent}>
+              <ActivityIndicator size="large" color="#6C5CE7" />
+              <Text style={styles.processingModalText}>Processing receipt...</Text>
+            </View>
+          </View>
+        </Modal>
+      )}
 
       {/* 分组方式选择菜单 */}
       <Modal
@@ -1799,6 +1936,25 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     minWidth: 24,
     textAlign: 'center',
+  },
+  processingModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  processingModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 32,
+    alignItems: 'center',
+    minWidth: 200,
+  },
+  processingModalText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#2D3436',
+    fontWeight: '500',
   },
 });
 

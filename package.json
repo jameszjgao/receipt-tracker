@@ -3,12 +3,15 @@
   "version": "1.4.0",
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start --go --lan",
-    "start:lan": "expo start --go --lan",
-    "start:localhost": "expo start --go --localhost",
+    "start": "expo start --dev-client",
+    "start:go": "expo start --go --lan",
+    "start:lan": "expo start --dev-client --lan",
+    "start:localhost": "expo start --dev-client --localhost",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "prebuild": "expo prebuild",
+    "prebuild:clean": "expo prebuild --clean"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

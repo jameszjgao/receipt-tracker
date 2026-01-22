@@ -34,13 +34,6 @@ export default function RootLayout() {
           }} 
         />
         <Stack.Screen 
-          name="camera" 
-          options={{ 
-            title: '',
-            headerBackTitle: 'Home'
-          }} 
-        />
-        <Stack.Screen 
           name="login" 
           options={{ 
             headerShown: false

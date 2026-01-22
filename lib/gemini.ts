@@ -17,10 +17,10 @@ const getSafeKey = () => {
 
 const apiKey = getSafeKey();
 
-const genAI = (apiKey && apiKey !== '') 
-  ? new GoogleGenerativeAI(apiKey) 
+const genAI = (apiKey && apiKey !== '')
+  ? new GoogleGenerativeAI(apiKey)
   : null;
-  
+
 // 尝试多个可能的模型名称（按优先级排序，优先使用最快的模型）
 // gemini-1.5-flash 是最快的模型，适合实时处理
 const POSSIBLE_MODELS = [
@@ -39,14 +39,14 @@ let availableModelCache: string | null = null;
 export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptResult> {
   // 重新获取 API Key（确保使用最新的值）
   const currentApiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
-  
+
   // 调试日志
   console.log('=== Gemini API Key Debug ===');
   console.log('Constants.expoConfig?.extra?.geminiApiKey:', Constants.expoConfig?.extra?.geminiApiKey ? `Present (length: ${Constants.expoConfig.extra.geminiApiKey.length})` : 'Missing');
   console.log('process.env.EXPO_PUBLIC_GEMINI_API_KEY:', process.env.EXPO_PUBLIC_GEMINI_API_KEY ? `Present (length: ${process.env.EXPO_PUBLIC_GEMINI_API_KEY.length})` : 'Missing');
   console.log('Final currentApiKey:', currentApiKey ? `Present (length: ${currentApiKey.length})` : 'Missing');
   console.log('===========================');
-  
+
   // 验证 API Key 是否配置
   if (!currentApiKey || currentApiKey === '' || currentApiKey === 'placeholder-key') {
     const errorMsg = `Gemini API Key 未配置。\n\n调试信息：\n- Constants.expoConfig?.extra?.geminiApiKey: ${Constants.expoConfig?.extra?.geminiApiKey ? '存在' : '不存在'}\n- process.env.EXPO_PUBLIC_GEMINI_API_KEY: ${process.env.EXPO_PUBLIC_GEMINI_API_KEY ? '存在' : '不存在'}\n- 当前 API Key 值: ${currentApiKey || '(空)'}\n\n请在 EAS Secrets 中设置 EXPO_PUBLIC_GEMINI_API_KEY，然后重新构建应用。`;
@@ -62,7 +62,7 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
   if (currentApiKey) {
     console.log('API Key prefix:', currentApiKey.substring(0, 10) + '...');
   }
-  
+
   // 使用当前获取的 API Key 创建新的 genAI 实例
   const currentGenAI = new GoogleGenerativeAI(currentApiKey);
 
@@ -332,7 +332,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
 
   // 尝试每个模型，直到找到一个可用的
   let lastError: Error | null = null;
-  
+
   for (const modelName of modelsToTry) {
     try {
       console.log(`Trying model: ${modelName}...`);
@@ -358,7 +358,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
       const defaultCategory = categoryNames.length > 0 ? categoryNames[0] : 'Shopping';
       // 兼容处理：支持 paymentAccount 和 paymentAccountName 两种字段名
       const paymentAccountName = parsedResult.paymentAccountName || (parsedResult as any).paymentAccount || undefined;
-      
+
       // 处理图片质量评价
       const imageQuality = parsedResult.imageQuality ? {
         clarity: parsedResult.imageQuality.clarity !== undefined ? Number(parsedResult.imageQuality.clarity) : undefined,
@@ -366,7 +366,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
         clarityComment: parsedResult.imageQuality.clarityComment,
         completenessComment: parsedResult.imageQuality.completenessComment,
       } : undefined;
-      
+
       // 处理数据一致性检查
       const dataConsistency = parsedResult.dataConsistency ? {
         itemsSum: parsedResult.dataConsistency.itemsSum !== undefined ? Number(parsedResult.dataConsistency.itemsSum) : undefined,
@@ -374,14 +374,14 @@ Please return strictly in JSON format without any extra text. JSON format as fol
         missingItems: parsedResult.dataConsistency.missingItems !== undefined ? Boolean(parsedResult.dataConsistency.missingItems) : undefined,
         consistencyComment: parsedResult.dataConsistency.consistencyComment,
       } : undefined;
-      
+
       // 计算实际的明细金额总和（用于验证）
       const calculatedItemsSum = parsedResult.items.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
       const totalAmount = Number(parsedResult.totalAmount) || 0;
       const tax = parsedResult.tax !== undefined ? Number(parsedResult.tax) : 0;
       const expectedTotal = calculatedItemsSum + tax;
       const actualItemsSumMatches = Math.abs(expectedTotal - totalAmount) <= 0.01;
-      
+
       return {
         storeName: parsedResult.storeName || 'Unknown Store',
         date: parsedResult.date || new Date().toISOString().split('T')[0],
@@ -403,22 +403,22 @@ Please return strictly in JSON format without any extra text. JSON format as fol
           itemsSum: calculatedItemsSum,
           itemsSumMatchesTotal: actualItemsSumMatches,
           missingItems: !actualItemsSumMatches && calculatedItemsSum < totalAmount,
-          consistencyComment: actualItemsSumMatches 
-            ? 'Items sum matches total' 
+          consistencyComment: actualItemsSumMatches
+            ? 'Items sum matches total'
             : `Items sum (${calculatedItemsSum.toFixed(2)}) differs from total (${totalAmount.toFixed(2)}) by ${Math.abs(expectedTotal - totalAmount).toFixed(2)}`,
         },
       };
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       console.error(`❌ Model ${modelName} failed:`, lastError.message);
-      
+
       // 如果是模型不存在的错误，尝试下一个模型
       const errorMsg = lastError.message.toLowerCase();
       if (errorMsg.includes('not found') || errorMsg.includes('404')) {
         console.log(`  模型 ${modelName} 不可用，尝试下一个...`);
         continue;
       }
-      
+
       // 如果是其他错误（如 API Key 错误），不再尝试其他模型
       break;
     }
@@ -426,10 +426,10 @@ Please return strictly in JSON format without any extra text. JSON format as fol
 
   // 如果所有模型都失败了
   console.error('All models failed. Last error:', lastError);
-  
+
   if (lastError) {
     const errorMsg = lastError.message.toLowerCase();
-    
+
     // API Key 相关错误
     if (errorMsg.includes('api key') || errorMsg.includes('api_key') || errorMsg.includes('invalid api key') || errorMsg.includes('401')) {
       throw new Error(
@@ -442,17 +442,17 @@ Please return strictly in JSON format without any extra text. JSON format as fol
         `原始错误: ${lastError.message}`
       );
     }
-    
+
     // 配额相关错误
     if (errorMsg.includes('quota') || errorMsg.includes('429') || errorMsg.includes('rate limit')) {
       throw new Error(`API quota exhausted or limit reached\nOriginal error: ${lastError.message}`);
     }
-    
+
     // 权限相关错误
     if (errorMsg.includes('permission') || errorMsg.includes('403') || errorMsg.includes('forbidden')) {
       throw new Error(`API permission insufficient, please check API Key permissions\nOriginal error: ${lastError.message}`);
     }
-    
+
     // 模型不存在错误
     if (errorMsg.includes('not found') || errorMsg.includes('404')) {
       throw new Error(
@@ -469,15 +469,15 @@ Please return strictly in JSON format without any extra text. JSON format as fol
         `Original error: ${lastError.message}`
       );
     }
-    
+
     // 网络连接错误
-    if (errorMsg.includes('network') || 
-        errorMsg.includes('fetch') || 
-        errorMsg.includes('connection') ||
-        errorMsg.includes('timeout') ||
-        errorMsg.includes('econnrefused') ||
-        errorMsg.includes('failed to fetch') ||
-        errorMsg.includes('generativelanguage.googleapis.com')) {
+    if (errorMsg.includes('network') ||
+      errorMsg.includes('fetch') ||
+      errorMsg.includes('connection') ||
+      errorMsg.includes('timeout') ||
+      errorMsg.includes('econnrefused') ||
+      errorMsg.includes('failed to fetch') ||
+      errorMsg.includes('generativelanguage.googleapis.com')) {
       throw new Error(
         `Network connection failed\n\n` +
         `Possible causes:\n` +
@@ -492,7 +492,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
         `Original error: ${lastError.message}`
       );
     }
-    
+
     // 其他错误
     throw new Error(
       `Receipt recognition failed\n\n` +
@@ -501,7 +501,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
       `Please check API Key configuration and network connection`
     );
   }
-  
+
   throw new Error('Receipt recognition failed: Unknown error');
 }
 
@@ -509,15 +509,15 @@ Please return strictly in JSON format without any extra text. JSON format as fol
 export async function recognizeReceiptFromText(text: string): Promise<GeminiReceiptResult> {
   // 重新获取 API Key（确保使用最新的值）
   const currentApiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
-  
+
   if (!currentApiKey || currentApiKey === '' || currentApiKey === 'placeholder-key') {
     const error = new Error('Gemini API Key 未配置。请在 EAS Secrets 中设置 EXPO_PUBLIC_GEMINI_API_KEY。') as any;
     error.code = 'GEMINI_API_KEY_MISSING';
     throw error;
   }
-  
+
   const currentGenAI = new GoogleGenerativeAI(currentApiKey);
-  
+
   console.log('Starting receipt recognition with text...');
   console.log('Text input:', text);
 
@@ -573,7 +573,7 @@ export async function recognizeReceiptFromText(text: string): Promise<GeminiRece
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1; // 1-12
   const currentDay = now.getDate();
-  
+
   const prompt = `You are a financial expert. Please carefully analyze the receipt information from this text input and extract ALL available information. Pay special attention to details about the purchase time, payment account, store name, and all items.
 
 CURRENT DATE CONTEXT:
@@ -720,7 +720,7 @@ Example JSON format:
     }
 
     // 尝试使用模型（优先使用从 API 获取的模型）
-    const modelsToTry = availableModel 
+    const modelsToTry = availableModel
       ? [availableModel, ...POSSIBLE_MODELS]
       : POSSIBLE_MODELS;
 
@@ -787,7 +787,7 @@ Example JSON format:
             price: parsedResult.totalAmount - (parsedResult.tax || 0),
           }];
         }
-        
+
         // 验证每个item的必要字段，并确保有 purpose
         parsedResult.items = parsedResult.items.map((item: any) => {
           // 如果缺少 purpose，默认使用 "Home"
@@ -802,7 +802,7 @@ Example JSON format:
           }
           return true;
         });
-        
+
         // 如果过滤后items为空，创建默认item
         if (parsedResult.items.length === 0) {
           console.warn('All items were invalid, creating default item');
@@ -813,7 +813,7 @@ Example JSON format:
             price: parsedResult.totalAmount - (parsedResult.tax || 0),
           }];
         }
-        
+
         console.log('Parsed result items count:', parsedResult.items.length);
         console.log('Parsed result:', {
           storeName: parsedResult.storeName,
@@ -826,7 +826,7 @@ Example JSON format:
         if (!parsedResult.dataConsistency) {
           parsedResult.dataConsistency = {};
         }
-        
+
         // 计算itemsSum如果未提供
         if (parsedResult.items && parsedResult.items.length > 0) {
           if (parsedResult.dataConsistency.itemsSum === undefined) {
@@ -846,7 +846,7 @@ Example JSON format:
           parsedResult.dataConsistency.itemsSum = 0;
           parsedResult.dataConsistency.itemsSumMatchesTotal = false;
         }
-        
+
         // 确保 confidence 存在
         if (parsedResult.confidence === undefined) {
           parsedResult.confidence = 0.8; // 默认置信度
@@ -885,15 +885,15 @@ Example JSON format:
 export async function recognizeReceiptFromAudio(audioUri: string): Promise<GeminiReceiptResult> {
   // 重新获取 API Key（确保使用最新的值）
   const currentApiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
-  
+
   if (!currentApiKey || currentApiKey === '' || currentApiKey === 'placeholder-key') {
     const error = new Error('Gemini API Key 未配置。请在 EAS Secrets 中设置 EXPO_PUBLIC_GEMINI_API_KEY。') as any;
     error.code = 'GEMINI_API_KEY_MISSING';
     throw error;
   }
-  
+
   const currentGenAI = new GoogleGenerativeAI(currentApiKey);
-  
+
   console.log('Starting receipt recognition with audio...');
   console.log('Audio URI:', audioUri);
 
@@ -1014,7 +1014,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
     }
 
     // 尝试使用支持音频的模型（优先使用从 API 获取的模型）
-    const modelsToTry = availableModel 
+    const modelsToTry = availableModel
       ? [availableModel, ...POSSIBLE_MODELS]
       : POSSIBLE_MODELS;
 
