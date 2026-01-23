@@ -14,7 +14,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { signIn, getCurrentUser, getCurrentHousehold } from '@/lib/auth';
+import { signIn, getCurrentUser, getCurrentSpace } from '@/lib/auth';
 import { initializeAuthCache } from '@/lib/auth-cache';
 
 export default function LoginScreen() {
@@ -65,7 +65,7 @@ export default function LoginScreen() {
       // 登录成功后，首先检查邀请（处理邀请应在index之前）
       // 流程：登录成功 -> 判断是否被邀请 -> 有邀请跳转到handle-invitations，无邀请跳转到index
       try {
-        const { getPendingInvitationsForUser } = await import('@/lib/household-invitations');
+        const { getPendingInvitationsForUser } = await import('@/lib/space-invitations');
         const invitations = await getPendingInvitationsForUser();
         
         if (invitations.length > 0) {
@@ -79,7 +79,7 @@ export default function LoginScreen() {
         console.log('Login: Invitation check failed (non-blocking):', invError);
       }
       
-      // 没有邀请，跳转到index（index会检查是否有家庭，无家庭跳转到setup-household，有家庭进入应用）
+      // 没有邀请，跳转到index（index会检查是否有空间，无空间跳转到setup-space，有空间进入应用）
       console.log('Login: No invitations, redirecting to index');
       router.replace('/');
     }

@@ -3,7 +3,7 @@ import { getCurrentUser } from './auth';
 
 export interface ChatLog {
   id: string;
-  householdId: string;
+  spaceId: string;
   userId: string;
   receiptId?: string;
   type: 'image' | 'text' | 'audio';
@@ -44,16 +44,16 @@ export async function saveChatLog(params: CreateChatLogParams): Promise<void> {
       return;
     }
 
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) {
-      console.warn('User has no household ID, skipping chat log save');
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) {
+      console.warn('User has no space ID, skipping chat log save');
       return;
     }
 
     const { error } = await supabase
       .from('ai_chat_logs')
       .insert({
-        household_id: householdId,
+        space_id: spaceId,
         user_id: user.id,
         receipt_id: params.receiptId || null,
         type: params.type,
@@ -86,7 +86,7 @@ export async function saveChatLog(params: CreateChatLogParams): Promise<void> {
 }
 
 /**
- * 获取家庭的聊天日志列表
+ * 获取空间的聊天日志列表
  */
 export async function getChatLogs(limit: number = 100): Promise<ChatLog[]> {
   try {
@@ -95,15 +95,15 @@ export async function getChatLogs(limit: number = 100): Promise<ChatLog[]> {
       return [];
     }
 
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) {
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) {
       return [];
     }
 
     const { data, error } = await supabase
       .from('ai_chat_logs')
       .select('*')
-      .eq('household_id', householdId)
+      .eq('space_id', spaceId)
       .order('created_at', { ascending: false })
       .limit(limit);
 
@@ -114,7 +114,7 @@ export async function getChatLogs(limit: number = 100): Promise<ChatLog[]> {
 
     return (data || []).map((row: any) => ({
       id: row.id,
-      householdId: row.household_id,
+      spaceId: row.space_id,
       userId: row.user_id,
       receiptId: row.receipt_id,
       type: row.type,
@@ -145,15 +145,15 @@ export async function getChatLogsByReceiptId(receiptId: string): Promise<ChatLog
       return [];
     }
 
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) {
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) {
       return [];
     }
 
     const { data, error } = await supabase
       .from('ai_chat_logs')
       .select('*')
-      .eq('household_id', householdId)
+      .eq('space_id', spaceId)
       .eq('receipt_id', receiptId)
       .order('created_at', { ascending: false });
 
@@ -164,7 +164,7 @@ export async function getChatLogsByReceiptId(receiptId: string): Promise<ChatLog
 
     return (data || []).map((row: any) => ({
       id: row.id,
-      householdId: row.household_id,
+      spaceId: row.space_id,
       userId: row.user_id,
       receiptId: row.receipt_id,
       type: row.type,

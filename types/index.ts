@@ -4,7 +4,7 @@ export type ReceiptStatus = 'pending' | 'processing' | 'confirmed' | 'needs_reta
 // 商品用途（用途主数据表 purposes）
 export interface Purpose {
   id: string;
-  householdId: string;
+  spaceId: string;
   name: string;
   color: string;
   isDefault: boolean;
@@ -15,7 +15,7 @@ export interface Purpose {
 // 消费分类
 export interface Category {
   id: string;
-  householdId: string;
+  spaceId: string;
   name: string;
   color: string;
   isDefault: boolean;
@@ -26,17 +26,17 @@ export interface Category {
 // 支付账户
 export interface PaymentAccount {
   id: string;
-  householdId: string;
+  spaceId: string;
   name: string;
   isAiRecognized: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
 
-// 商家
-export interface Store {
+// 供应商
+export interface Supplier {
   id: string;
-  householdId: string;
+  spaceId: string;
   name: string;
   taxNumber?: string; // 税号
   phone?: string; // 电话
@@ -62,10 +62,11 @@ export interface ReceiptItem {
 // 小票数据
 export interface Receipt {
   id?: string;
-  householdId: string;
-  storeName: string;
-  storeId?: string; // 关联的商家ID
-  store?: Store; // 关联的商家对象
+  spaceId: string;
+  supplierName: string; // 供应商名称（保留 storeName 作为向后兼容）
+  storeName?: string; // 向后兼容字段，实际使用 supplierName
+  supplierId?: string; // 关联的供应商ID
+  supplier?: Supplier; // 关联的供应商对象
   totalAmount: number;
   date: string;
   paymentAccountId?: string;
@@ -88,22 +89,22 @@ export interface User {
   id: string;
   email: string;
   name?: string; // 用户自定义名字
-  householdId: string | null; // 保留向后兼容，但优先使用 currentHouseholdId（可能为 null）
-  currentHouseholdId?: string; // 当前活动的家庭ID（可能为 undefined）
+  spaceId: string | null; // 保留向后兼容，但优先使用 currentSpaceId（可能为 null）
+  currentSpaceId?: string; // 当前活动的空间ID（可能为 undefined）
   createdAt?: string;
 }
 
-// 用户-家庭关联
-export interface UserHousehold {
+// 用户-空间关联
+export interface UserSpace {
   id: string;
   userId: string;
-  householdId: string;
-  household?: Household; // 关联的家庭信息
+  spaceId: string;
+  space?: Space; // 关联的空间信息
   createdAt?: string;
 }
 
-// 家庭账户
-export interface Household {
+// 空间账户
+export interface Space {
   id: string;
   name: string;
   address?: string;
@@ -130,7 +131,7 @@ export interface DataConsistency {
 // Gemini识别结果（使用分类名称，后续会匹配到分类ID）
 export interface GeminiReceiptResult {
   storeName: string;
-  storeInfo?: {
+  supplierInfo?: {
     taxNumber?: string; // 税号
     phone?: string; // 电话
     address?: string; // 地址

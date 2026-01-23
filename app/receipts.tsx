@@ -156,8 +156,8 @@ export default function ReceiptsScreen() {
 
       const today = new Date().toISOString().split('T')[0];
       const receiptId = await saveReceipt({
-        householdId: '',
-        storeName: 'Processing...',
+        spaceId: '',
+        supplierName: 'Processing...',
         totalAmount: 0,
         date: today,
         status: 'processing',
@@ -227,15 +227,17 @@ export default function ReceiptsScreen() {
         };
 
         // 1. 监听 receipts 表的变化（入库、状态变化、主要信息更新）
+        const spaceId = user.currentSpaceId || user.spaceId;
+        if (!spaceId) return;
         receiptsChannel = supabase
-          .channel(`receipts-changes-${user.householdId}`)
+          .channel(`receipts-changes-${spaceId}`)
           .on(
             'postgres_changes',
             {
               event: '*', // INSERT, UPDATE, DELETE
               schema: 'public',
               table: 'receipts',
-              filter: `household_id=eq.${user.householdId}`,
+              filter: `space_id=eq.${spaceId}`,
             },
             (payload) => {
               const receiptId = (payload.new as any)?.id || (payload.old as any)?.id;
@@ -266,7 +268,7 @@ export default function ReceiptsScreen() {
 
         // 2. 监听 receipt_items 表的变化（商品项的变化会影响列表显示）
         receiptItemsChannel = supabase
-          .channel(`receipt-items-changes-${user.householdId}`)
+          .channel(`receipt-items-changes-${spaceId}`)
           .on(
             'postgres_changes',
             {
@@ -288,14 +290,14 @@ export default function ReceiptsScreen() {
 
         // 3. 监听 payment_accounts 表的变化（支付账户名称变化会影响显示）
         paymentAccountsChannel = supabase
-          .channel(`payment-accounts-changes-${user.householdId}`)
+          .channel(`payment-accounts-changes-${spaceId}`)
           .on(
             'postgres_changes',
             {
               event: '*', // INSERT, UPDATE, DELETE
               schema: 'public',
               table: 'payment_accounts',
-              filter: `household_id=eq.${user.householdId}`,
+              filter: `space_id=eq.${spaceId}`,
             },
             (payload) => {
               console.log('Payment account changed:', payload.eventType);
@@ -746,16 +748,16 @@ export default function ReceiptsScreen() {
     const query = searchQuery.trim().toLowerCase();
     
     return filteredReceipts.filter(receipt => {
-      // 搜索商户名称（优先使用 store.name，兼容旧数据的 storeName）
-      const displayStoreName = receipt.store?.name || receipt.storeName || '';
-      const storeNameMatch = displayStoreName.toLowerCase().includes(query);
+      // 搜索供应商名称（优先使用 supplier.name，兼容旧数据的 supplierName）
+      const displaySupplierName = receipt.supplier?.name || receipt.supplierName || '';
+      const supplierNameMatch = displaySupplierName.toLowerCase().includes(query);
       
       // 搜索商品明细名称
       const itemsMatch = receipt.items?.some(item => 
         item.name?.toLowerCase().includes(query)
       );
       
-      return storeNameMatch || itemsMatch;
+      return supplierNameMatch || itemsMatch;
     });
   }, [filteredReceipts, searchQuery]);
 
@@ -900,7 +902,7 @@ export default function ReceiptsScreen() {
             <View style={styles.receiptContent}>
                   <View style={styles.firstRow}>
               <Text style={styles.storeName} numberOfLines={1}>
-                {item.store?.name || item.storeName || 'Unknown Store'}
+                {item.supplier?.name || item.supplierName || 'Unknown Supplier'}
               </Text>
                 {item.status === 'confirmed' ? (
                   <View style={styles.confirmedStatusContainer}>

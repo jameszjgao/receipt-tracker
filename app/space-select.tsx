@@ -13,32 +13,33 @@ import {
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { getUserHouseholds, setCurrentHousehold, createHousehold, getCurrentUser } from '@/lib/auth';
-import { UserHousehold } from '@/types';
+import { getUserSpaces, setCurrentSpace, createSpace, getCurrentUser, getCurrentSpace } from '@/lib/auth';
+import { UserSpace } from '@/types';
+import { initializeAuthCache } from '@/lib/auth-cache';
 
-export default function HouseholdSelectScreen() {
+export default function SpaceSelectScreen() {
   const router = useRouter();
-  const [households, setHouseholds] = useState<UserHousehold[]>([]);
+  const [spaces, setSpaces] = useState<UserSpace[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newHouseholdName, setNewHouseholdName] = useState('');
-  const [newHouseholdAddress, setNewHouseholdAddress] = useState('');
+  const [newSpaceName, setNewSpaceName] = useState('');
+  const [newSpaceAddress, setNewSpaceAddress] = useState('');
 
   useEffect(() => {
-    loadHouseholds();
+    loadSpaces();
   }, []);
 
-  const loadHouseholds = async () => {
+  const loadSpaces = async () => {
     try {
       setLoading(true);
-      const data = await getUserHouseholds();
-      setHouseholds(data);
+      const data = await getUserSpaces();
+      setSpaces(data);
       
-      // 如果用户只有一个家庭，自动设置并跳转
+      // 如果用户只有一个空间，自动设置并跳转
       if (data.length === 1) {
-        const householdId = data[0].householdId;
-        const { error } = await setCurrentHousehold(householdId);
+        const spaceId = data[0].spaceId;
+        const { error } = await setCurrentSpace(spaceId);
         if (!error) {
           router.replace('/');
           return;
@@ -49,16 +50,16 @@ export default function HouseholdSelectScreen() {
       }
       // 如果没有家庭或需要选择，显示选择页面
     } catch (error) {
-      console.error('Error loading households:', error);
+      console.error('Error loading spaces:', error);
       Alert.alert('Error', 'Failed to load spaces');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSelectHousehold = async (householdId: string) => {
+  const handleSelectSpace = async (spaceId: string) => {
     try {
-      const { error } = await setCurrentHousehold(householdId);
+      const { error } = await setCurrentSpace(spaceId);
       if (error) {
         Alert.alert('Error', error.message);
         return;
@@ -66,27 +67,27 @@ export default function HouseholdSelectScreen() {
       
       // 更新缓存
       const updatedUser = await getCurrentUser(true);
-      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
-      await initializeAuthCache(updatedUser, updatedHousehold);
+      const updatedSpace = updatedUser ? await getCurrentSpace(true) : null;
+      await initializeAuthCache(updatedUser, updatedSpace);
       
       router.replace('/');
     } catch (error) {
-      console.error('Error selecting household:', error);
+      console.error('Error selecting space:', error);
       Alert.alert('Error', 'Failed to select space');
     }
   };
 
-  const handleCreateHousehold = async () => {
-    if (!newHouseholdName.trim()) {
+  const handleCreateSpace = async () => {
+    if (!newSpaceName.trim()) {
       Alert.alert('Error', 'Please enter space name');
       return;
     }
 
     try {
       setCreating(true);
-      const { household, error } = await createHousehold(
-        newHouseholdName.trim(),
-        newHouseholdAddress.trim() || undefined
+      const { space, error } = await createSpace(
+        newSpaceName.trim(),
+        newSpaceAddress.trim() || undefined
       );
 
       if (error) {
@@ -94,20 +95,20 @@ export default function HouseholdSelectScreen() {
         return;
       }
 
-      if (household) {
+      if (space) {
         // 更新缓存
         const updatedUser = await getCurrentUser(true);
-        await initializeAuthCache(updatedUser, household);
+        await initializeAuthCache(updatedUser, space);
         
         setShowCreateModal(false);
-        setNewHouseholdName('');
-        setNewHouseholdAddress('');
-        await loadHouseholds();
-        // createHousehold 已经设置了当前家庭，直接进入应用
+        setNewSpaceName('');
+        setNewSpaceAddress('');
+        await loadSpaces();
+        // createSpace 已经设置了当前空间，直接进入应用
         router.replace('/');
       }
     } catch (error) {
-      console.error('Error creating household:', error);
+      console.error('Error creating space:', error);
       Alert.alert('Error', 'Failed to create space');
     } finally {
       setCreating(false);
@@ -140,26 +141,26 @@ export default function HouseholdSelectScreen() {
           <Text style={styles.subtitle}>Choose or create a space to continue</Text>
         </View>
 
-        {households.length > 0 && (
-          <View style={styles.householdsList}>
+        {spaces.length > 0 && (
+          <View style={styles.spacesList}>
             <Text style={styles.sectionTitle}>Your Spaces</Text>
-            {households.map((userHousehold) => (
+            {spaces.map((userSpace) => (
               <TouchableOpacity
-                key={userHousehold.id}
-                style={styles.householdCard}
-                onPress={() => handleSelectHousehold(userHousehold.householdId)}
+                key={userSpace.id}
+                style={styles.spaceCard}
+                onPress={() => handleSelectSpace(userSpace.spaceId)}
                 activeOpacity={0.7}
               >
-                <View style={styles.householdIcon}>
+                <View style={styles.spaceIcon}>
                   <Ionicons name="home-outline" size={24} color="#6C5CE7" />
                 </View>
-                <View style={styles.householdInfo}>
-                  <Text style={styles.householdName}>
-                    {userHousehold.household?.name || 'Unknown Space'}
+                <View style={styles.spaceInfo}>
+                  <Text style={styles.spaceName}>
+                    {userSpace.space?.name || 'Unknown Space'}
                   </Text>
-                  {userHousehold.household?.address && (
-                    <Text style={styles.householdAddress} numberOfLines={1}>
-                      {userHousehold.household.address}
+                  {userSpace.space?.address && (
+                    <Text style={styles.spaceAddress} numberOfLines={1}>
+                      {userSpace.space.address}
                     </Text>
                   )}
                 </View>
@@ -217,8 +218,8 @@ export default function HouseholdSelectScreen() {
                   style={styles.input}
                   placeholder="Space Name"
                   placeholderTextColor="#95A5A6"
-                  value={newHouseholdName}
-                  onChangeText={setNewHouseholdName}
+                  value={newSpaceName}
+                  onChangeText={setNewSpaceName}
                   autoFocus
                 />
               </View>
@@ -229,8 +230,8 @@ export default function HouseholdSelectScreen() {
                   style={[styles.input, styles.multilineInput]}
                   placeholder="Address (Optional)"
                   placeholderTextColor="#95A5A6"
-                  value={newHouseholdAddress}
-                  onChangeText={setNewHouseholdAddress}
+                  value={newSpaceAddress}
+                  onChangeText={setNewSpaceAddress}
                   multiline
                   numberOfLines={3}
                 />
@@ -238,8 +239,8 @@ export default function HouseholdSelectScreen() {
 
               <TouchableOpacity
                 style={[styles.modalButton, creating && styles.modalButtonDisabled]}
-                onPress={handleCreateHousehold}
-                disabled={creating || !newHouseholdName.trim()}
+                onPress={handleCreateSpace}
+                disabled={creating || !newSpaceName.trim()}
               >
                 {creating ? (
                   <ActivityIndicator color="#fff" />
@@ -304,7 +305,7 @@ const styles = StyleSheet.create({
     color: '#636E72',
     textAlign: 'center',
   },
-  householdsList: {
+  spacesList: {
     marginBottom: 24,
   },
   sectionTitle: {
@@ -313,7 +314,7 @@ const styles = StyleSheet.create({
     color: '#2D3436',
     marginBottom: 16,
   },
-  householdCard: {
+  spaceCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
@@ -323,7 +324,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E9ECEF',
   },
-  householdIcon: {
+  spaceIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
@@ -332,16 +333,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
-  householdInfo: {
+  spaceInfo: {
     flex: 1,
   },
-  householdName: {
+  spaceName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#2D3436',
     marginBottom: 4,
   },
-  householdAddress: {
+  spaceAddress: {
     fontSize: 14,
     color: '#636E72',
   },

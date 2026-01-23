@@ -21,7 +21,7 @@ import { format } from 'date-fns';
 
 export default function ManualEntryScreen() {
   const router = useRouter();
-  const [storeName, setStoreName] = useState('');
+  const [supplierName, setSupplierName] = useState('');
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [totalAmount, setTotalAmount] = useState('');
   const [paymentAccountId, setPaymentAccountId] = useState<string | undefined>(undefined);
@@ -44,8 +44,8 @@ export default function ManualEntryScreen() {
 
   const handleSave = async () => {
     // 验证必填字段
-    if (!storeName.trim()) {
-      Alert.alert('Error', 'Please enter store name');
+    if (!supplierName.trim()) {
+      Alert.alert('Error', 'Please enter supplier name');
       return;
     }
 
@@ -64,8 +64,8 @@ export default function ManualEntryScreen() {
       setIsSaving(true);
 
       const receipt: Receipt = {
-        householdId: '', // 会在 saveReceipt 中自动获取
-        storeName: storeName.trim(),
+        spaceId: '', // 会在 saveReceipt 中自动获取
+        supplierName: supplierName.trim(),
         totalAmount: amount,
         date: date,
         status: 'confirmed' as ReceiptStatus,
@@ -85,7 +85,7 @@ export default function ManualEntryScreen() {
             text: 'Add Another',
             onPress: () => {
               // 重置表单
-              setStoreName('');
+              setSupplierName('');
               setDate(format(new Date(), 'yyyy-MM-dd'));
               setTotalAmount('');
               setPaymentAccountId(undefined);
@@ -131,13 +131,13 @@ export default function ManualEntryScreen() {
       <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.form}>
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Store Name *</Text>
+            <Text style={styles.label}>Supplier Name *</Text>
             <TextInput
               style={styles.input}
-              placeholder="Enter store name"
+              placeholder="Enter supplier name"
               placeholderTextColor="#95A5A6"
-              value={storeName}
-              onChangeText={setStoreName}
+              value={supplierName}
+              onChangeText={setSupplierName}
               autoCapitalize="words"
             />
           </View>

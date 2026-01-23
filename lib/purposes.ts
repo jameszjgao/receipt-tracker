@@ -4,7 +4,7 @@ import { getCurrentUser } from './auth';
 // 用途接口
 export interface Purpose {
   id: string;
-  householdId: string;
+  spaceId: string;
   name: string;
   color: string;
   isDefault: boolean;
@@ -12,20 +12,20 @@ export interface Purpose {
   updatedAt?: string;
 }
 
-// 获取当前家庭的所有用途
+// 获取当前空间的所有用途
 export async function getPurposes(): Promise<Purpose[]> {
   try {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     const { data, error } = await supabase
       .from('purposes')
       .select('*')
-      .eq('household_id', householdId)
+      .eq('space_id', spaceId)
       .order('is_default', { ascending: false })
       .order('name', { ascending: true });
 
@@ -33,7 +33,7 @@ export async function getPurposes(): Promise<Purpose[]> {
 
     return (data || []).map((row: any) => ({
       id: row.id,
-      householdId: row.household_id,
+      spaceId: row.space_id,
       name: row.name,
       color: row.color,
       isDefault: row.is_default,
@@ -52,14 +52,14 @@ export async function createPurpose(name: string, color: string = '#95A5A6'): Pr
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     const { data, error } = await supabase
       .from('purposes')
       .insert({
-        household_id: householdId,
+        space_id: spaceId,
         name: name.trim(),
         color: color,
         is_default: false,
@@ -71,7 +71,7 @@ export async function createPurpose(name: string, color: string = '#95A5A6'): Pr
 
     return {
       id: data.id,
-      householdId: data.household_id,
+      spaceId: data.space_id,
       name: data.name,
       color: data.color,
       isDefault: data.is_default,
@@ -94,15 +94,15 @@ export async function updatePurpose(purposeId: string, updates: { name?: string;
     if (updates.name !== undefined) updateData.name = updates.name.trim();
     if (updates.color !== undefined) updateData.color = updates.color;
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     const { error } = await supabase
       .from('purposes')
       .update(updateData)
       .eq('id', purposeId)
-      .eq('household_id', householdId);
+      .eq('space_id', spaceId);
 
     if (error) throw error;
   } catch (error) {
@@ -117,16 +117,16 @@ export async function deletePurpose(purposeId: string): Promise<void> {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     // 检查是否为默认用途
     const { data: purpose, error: fetchError } = await supabase
       .from('purposes')
       .select('is_default')
       .eq('id', purposeId)
-      .eq('household_id', householdId)
+      .eq('space_id', spaceId)
       .single();
 
     if (fetchError) throw fetchError;
@@ -138,7 +138,7 @@ export async function deletePurpose(purposeId: string): Promise<void> {
       .from('purposes')
       .delete()
       .eq('id', purposeId)
-      .eq('household_id', householdId);
+      .eq('space_id', spaceId);
 
     if (error) throw error;
   } catch (error) {
@@ -153,14 +153,14 @@ export async function findPurposeByName(name: string): Promise<Purpose | null> {
     const user = await getCurrentUser();
     if (!user) return null;
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) return null;
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) return null;
 
     const { data, error } = await supabase
       .from('purposes')
       .select('*')
-      .eq('household_id', householdId)
+      .eq('space_id', spaceId)
       .ilike('name', name.trim())
       .limit(1)
       .single();
@@ -172,7 +172,7 @@ export async function findPurposeByName(name: string): Promise<Purpose | null> {
 
     return {
       id: data.id,
-      householdId: data.household_id,
+      spaceId: data.space_id,
       name: data.name,
       color: data.color,
       isDefault: data.is_default,

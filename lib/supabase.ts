@@ -33,7 +33,7 @@ export const supabase = createClient(
     },
     global: {
       headers: {
-        'x-client-info': 'receipt-tracker@1.0.0',
+        'x-client-info': 'vouchap@2.0.0',
       },
     },
   }

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { supabase } from '@/lib/supabase';
-import { getInvitationById } from '@/lib/household-invitations';
+import { getInvitationById } from '@/lib/space-invitations';
 
 export default function InviteScreen() {
   const router = useRouter();

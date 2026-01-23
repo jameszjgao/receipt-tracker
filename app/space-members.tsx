@@ -17,21 +17,21 @@ import {
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { getHouseholdMembers, HouseholdMember } from '@/lib/household-members';
-import { getCurrentUser, getCurrentHousehold } from '@/lib/auth';
+import { getSpaceMembers, SpaceMember } from '@/lib/space-members';
+import { getCurrentUser, getCurrentSpace } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
-import { createInvitation, getHouseholdInvitations, cancelInvitation, HouseholdInvitation } from '@/lib/household-invitations';
+import { createInvitation, getSpaceInvitations, cancelInvitation, SpaceInvitation } from '@/lib/space-invitations';
 import { GradientText } from '@/lib/GradientText';
 
-export default function HouseholdMembersScreen() {
+export default function SpaceMembersScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [members, setMembers] = useState<HouseholdMember[]>([]);
-  const [pendingInvitations, setPendingInvitations] = useState<HouseholdInvitation[]>([]);
-  const [declinedInvitations, setDeclinedInvitations] = useState<HouseholdInvitation[]>([]);
-  const [cancelledInvitations, setCancelledInvitations] = useState<HouseholdInvitation[]>([]);
-  const [removedInvitations, setRemovedInvitations] = useState<HouseholdInvitation[]>([]);
+  const [members, setMembers] = useState<SpaceMember[]>([]);
+  const [pendingInvitations, setPendingInvitations] = useState<SpaceInvitation[]>([]);
+  const [declinedInvitations, setDeclinedInvitations] = useState<SpaceInvitation[]>([]);
+  const [cancelledInvitations, setCancelledInvitations] = useState<SpaceInvitation[]>([]);
+  const [removedInvitations, setRemovedInvitations] = useState<SpaceInvitation[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isCurrentUserAdmin, setIsCurrentUserAdmin] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -43,16 +43,16 @@ export default function HouseholdMembersScreen() {
   }, []);
 
   // 加载并分类邀请列表的通用函数
-  const loadAndClassifyInvitations = async (user: any, householdId: string) => {
-    console.log('Loading invitations for household:', householdId);
-    const invitations = await getHouseholdInvitations(householdId);
+  const loadAndClassifyInvitations = async (user: any, spaceId: string) => {
+    console.log('Loading invitations for space:', spaceId);
+    const invitations = await getSpaceInvitations(spaceId);
     console.log('Loaded invitations:', invitations.length, invitations);
     
-    // 获取当前家庭的所有成员邮箱
+    // 获取当前空间的所有成员邮箱
     const { data: existingMembers } = await supabase
-      .from('user_households')
+      .from('user_spaces')
       .select('user_id')
-      .eq('household_id', householdId);
+      .eq('space_id', spaceId);
     
     const existingUserIds = new Set(existingMembers?.map(m => m.user_id) || []);
     console.log('Existing member IDs:', Array.from(existingUserIds));
@@ -64,8 +64,8 @@ export default function HouseholdMembersScreen() {
     if (existingUserIds.size > 0) {
       try {
         // 尝试使用 RPC 函数获取用户信息
-        const { data: usersData, error: rpcError } = await supabase.rpc('get_household_member_users', {
-          p_household_id: householdId
+        const { data: usersData, error: rpcError } = await supabase.rpc('get_space_member_users', {
+          p_space_id: spaceId
         });
         
         if (!rpcError && usersData && Array.isArray(usersData)) {
@@ -86,7 +86,7 @@ export default function HouseholdMembersScreen() {
     }
     
     // 先按email去重，每个email只保留最新的邀请记录
-    const emailToLatestInvitation = new Map<string, HouseholdInvitation>();
+    const emailToLatestInvitation = new Map<string, SpaceInvitation>();
     invitations.forEach(inv => {
       const email = inv.inviteeEmail.toLowerCase();
       const existing = emailToLatestInvitation.get(email);
@@ -96,10 +96,10 @@ export default function HouseholdMembersScreen() {
     });
     
     // 分类邀请
-    const pending: HouseholdInvitation[] = [];
-    const declined: HouseholdInvitation[] = [];
-    const cancelled: HouseholdInvitation[] = [];
-    const removed: HouseholdInvitation[] = [];
+    const pending: SpaceInvitation[] = [];
+    const declined: SpaceInvitation[] = [];
+    const cancelled: SpaceInvitation[] = [];
+    const removed: SpaceInvitation[] = [];
     
     emailToLatestInvitation.forEach(inv => {
       const inviteeEmail = inv.inviteeEmail.toLowerCase();
@@ -149,7 +149,7 @@ export default function HouseholdMembersScreen() {
       if (user) {
         setCurrentUserId(user.id);
       }
-      const data = await getHouseholdMembers();
+      const data = await getSpaceMembers();
       setMembers(data);
       
       // 检查当前用户是否是管理员
@@ -159,7 +159,7 @@ export default function HouseholdMembersScreen() {
       
       return { user, isAdmin };
     } catch (error) {
-      console.error('Error loading household members:', error);
+      console.error('Error loading space members:', error);
       throw error;
     }
   };
@@ -170,10 +170,10 @@ export default function HouseholdMembersScreen() {
       const user = await getCurrentUser();
       if (!user) return;
       
-      const householdId = user.currentHouseholdId || user.householdId;
-      if (!householdId) return;
+      const spaceId = user.currentSpaceId || user.spaceId;
+      if (!spaceId) return;
       
-      await loadAndClassifyInvitations(user, householdId);
+      await loadAndClassifyInvitations(user, spaceId);
     } catch (error) {
       console.error('Error loading invitations:', error);
       // 不显示错误提示，因为这是增量更新
@@ -188,14 +188,14 @@ export default function HouseholdMembersScreen() {
       
       // 如果是管理员，加载邀请列表
       if (isAdmin && user) {
-        const householdId = user.currentHouseholdId || user.householdId;
-        if (householdId) {
-          await loadAndClassifyInvitations(user, householdId);
+        const spaceId = user.currentSpaceId || user.spaceId;
+        if (spaceId) {
+          await loadAndClassifyInvitations(user, spaceId);
         }
       }
     } catch (error) {
-      console.error('Error loading household members:', error);
-      Alert.alert('Error', 'Failed to load household members');
+      console.error('Error loading space members:', error);
+      Alert.alert('Error', 'Failed to load space members');
     } finally {
       setLoading(false);
     }
@@ -241,7 +241,7 @@ export default function HouseholdMembersScreen() {
     }
   };
 
-  const getDisplayName = (member: HouseholdMember) => {
+  const getDisplayName = (member: SpaceMember) => {
     // 优先使用自定义名字，如果没有则使用邮箱前缀
     if (member.name && member.name.trim()) {
       return member.name.trim();
@@ -308,9 +308,9 @@ export default function HouseholdMembersScreen() {
     const emailToInvite = inviteEmail.trim();
     
     // 立即添加到pending列表，显示loading状态
-    const tempInvitation: HouseholdInvitation = {
+    const tempInvitation: SpaceInvitation = {
       id: `temp-${Date.now()}`,
-      householdId: '', // 将在加载时填充
+      spaceId: '', // 将在加载时填充
       inviterId: '',
       inviteeEmail: emailToInvite,
       status: 'pending',
@@ -337,10 +337,10 @@ export default function HouseholdMembersScreen() {
     }
   };
 
-  const handleRemoveMember = async (member: HouseholdMember) => {
+  const handleRemoveMember = async (member: SpaceMember) => {
     Alert.alert(
       'Remove Member',
-      `Are you sure you want to remove ${getDisplayName(member)} from this household?`,
+      `Are you sure you want to remove ${getDisplayName(member)} from this space?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -351,31 +351,31 @@ export default function HouseholdMembersScreen() {
               const user = await getCurrentUser();
               if (!user) return;
               
-              const householdId = user.currentHouseholdId || user.householdId;
+              const spaceId = user.currentSpaceId || user.spaceId;
               const memberUserId = member.userId;
               
-              // 步骤1：从user_households表中移除关联数据
+              // 步骤1：从user_spaces表中移除关联数据
               // 优先使用 RPC 函数删除（绕过 RLS）
               let deleteSuccess = false;
               
               try {
-                const { data: rpcResult, error: rpcError } = await supabase.rpc('remove_household_member', {
+                const { data: rpcResult, error: rpcError } = await supabase.rpc('remove_space_member', {
                   p_target_user_id: memberUserId,
-                  p_household_id: householdId
+                  p_space_id: spaceId
                 });
                 
                 if (rpcError) {
                   // RPC 函数不存在或失败，回退到直接删除
                   console.log('RPC function failed, falling back to direct delete:', rpcError);
                   const { error: deleteError } = await supabase
-                    .from('user_households')
+                    .from('user_spaces')
                     .delete()
                     .eq('user_id', memberUserId)
-                    .eq('household_id', householdId);
+                    .eq('space_id', spaceId);
                   
                   if (deleteError) {
-                    console.error('Error deleting user_households (direct delete):', deleteError);
-                    throw new Error(`Failed to remove member: ${deleteError.message || 'RLS policy may not allow DELETE operation. Please execute fix-user-households-delete-policy.sql in Supabase SQL Editor.'}`);
+                    console.error('Error deleting user_spaces (direct delete):', deleteError);
+                    throw new Error(`Failed to remove member: ${deleteError.message || 'RLS policy may not allow DELETE operation. Please execute fix-user-spaces-delete-policy.sql in Supabase SQL Editor.'}`);
                   } else {
                     deleteSuccess = true;
                   }
@@ -389,16 +389,16 @@ export default function HouseholdMembersScreen() {
               }
               
               if (!deleteSuccess) {
-                throw new Error('Failed to remove member from household');
+                throw new Error('Failed to remove member from space');
               }
               
               // 步骤2：更新对应的邀请记录的状态为'removed'
               // 查找所有与该成员相关的邀请记录（通过邮箱匹配）
               try {
                 const { data: invitations, error: queryError } = await supabase
-                  .from('household_invitations')
+                  .from('space_invitations')
                   .select('id, invitee_email, status')
-                  .eq('household_id', householdId)
+                  .eq('space_id', spaceId)
                   .eq('invitee_email', member.email.toLowerCase().trim());
                 
                 if (queryError) {
@@ -420,7 +420,7 @@ export default function HouseholdMembersScreen() {
                       // RPC 函数不存在或失败，回退到直接更新
                       console.log('RPC function failed, falling back to direct update:', rpcError);
                       const { error: updateInvitationError, data: updatedInvitations } = await supabase
-                        .from('household_invitations')
+                        .from('space_invitations')
                         .update({ status: 'removed' })
                         .in('id', invitationIds)
                         .select();
@@ -429,7 +429,7 @@ export default function HouseholdMembersScreen() {
                         console.error('Error updating invitation status to removed (direct update):', updateInvitationError);
                         // 如果直接更新也失败，可能是数据库约束问题，尝试使用 'cancelled' 作为备选
                         const { error: fallbackError, data: fallbackData } = await supabase
-                          .from('household_invitations')
+                          .from('space_invitations')
                           .update({ status: 'cancelled' })
                           .in('id', invitationIds)
                           .select();
@@ -456,24 +456,24 @@ export default function HouseholdMembersScreen() {
                 Alert.alert('Warning', `Failed to update invitation status: ${invitationError?.message || 'Unknown error'}. Member removed, but invitation status may not be updated.`);
               }
               
-              // 步骤3：如果被删成员的current_household_id与当前household相同，则清空该字段
+              // 步骤3：如果被删成员的current_space_id与当前space相同，则清空该字段
               // 尝试使用RPC函数更新（即使无法获取用户信息，也尝试直接更新）
-              const { error: rpcUpdateError } = await supabase.rpc('update_user_current_household', {
+              const { error: rpcUpdateError } = await supabase.rpc('update_user_current_space', {
                 p_user_id: memberUserId,
-                p_household_id: null,
+                p_space_id: null,
               });
               
               if (rpcUpdateError) {
-                // RPC函数不存在或失败，回退到直接更新（使用条件更新，只有current_household_id匹配时才更新）
+                // RPC函数不存在或失败，回退到直接更新（使用条件更新，只有current_space_id匹配时才更新）
                 console.log('RPC function failed, falling back to direct update:', rpcUpdateError);
                 const { error: updateError } = await supabase
                   .from('users')
-                  .update({ current_household_id: null })
+                  .update({ current_space_id: null })
                   .eq('id', memberUserId)
-                  .eq('current_household_id', householdId);
+                  .eq('current_space_id', spaceId);
                 
                 if (updateError) {
-                  console.error('Error clearing current_household_id:', updateError);
+                  console.error('Error clearing current_space_id:', updateError);
                   // 不抛出错误，继续执行（因为可能由于RLS限制无法更新）
                 }
               }

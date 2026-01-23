@@ -114,16 +114,16 @@ export async function checkDuplicateReceipt(newReceipt: Receipt): Promise<Receip
       let matchScore = 0;
       let totalChecks = 0;
       
-      // 1. 检查商店名称相似度
-      const storeNameSimilarity = stringSimilarity(
-        newReceipt.storeName,
-        existingReceipt.storeName
+      // 1. 检查供应商名称相似度
+      const supplierNameSimilarity = stringSimilarity(
+        newReceipt.supplierName || '',
+        existingReceipt.supplierName || ''
       );
-      if (storeNameSimilarity > 0.8) {
-        matchScore += storeNameSimilarity;
+      if (supplierNameSimilarity > 0.8) {
+        matchScore += supplierNameSimilarity;
         totalChecks++;
       } else {
-        continue; // 商店名称差异太大，跳过
+        continue; // 供应商名称差异太大，跳过
       }
       
       // 2. 检查日期是否相同或相近
@@ -162,7 +162,7 @@ export async function checkDuplicateReceipt(newReceipt: Receipt): Promise<Receip
           newReceiptId: newReceipt.id,
           duplicateReceiptId: existingReceipt.id,
           matchScore: matchScore / totalChecks,
-          storeNameSimilarity,
+          supplierNameSimilarity,
         });
         return existingReceipt;
       }

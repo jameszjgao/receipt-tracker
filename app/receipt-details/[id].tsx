@@ -20,9 +20,9 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { getReceiptById, updateReceipt, updateReceiptItem } from '@/lib/database';
 import { uploadReceiptImage } from '@/lib/supabase';
 import { getCategories } from '@/lib/categories';
-import { getPurposes, Purpose } from '@/lib/purposes';
+import { getPurposes } from '@/lib/purposes';
 import { getPaymentAccounts } from '@/lib/payment-accounts';
-import { Receipt, ReceiptItem, Category, ItemPurpose, ReceiptStatus, PaymentAccount } from '@/types';
+import { Receipt, ReceiptItem, Category, Purpose, ReceiptStatus, PaymentAccount } from '@/types';
 import { format } from 'date-fns';
 
 export default function ReceiptDetailsScreen() {
@@ -230,15 +230,15 @@ export default function ReceiptDetailsScreen() {
     });
   };
 
-  // 处理商家名称变更
-  const handleStoreNameChange = (storeName: string) => {
+  // 处理供应商名称变更
+  const handleSupplierNameChange = (supplierName: string) => {
     if (!editedReceipt) return;
     setEditedReceipt({
       ...editedReceipt,
-      storeName: storeName,
-      // 如果修改了商家名称，清除 storeId，让系统重新查找或创建商家
-      storeId: undefined,
-      store: undefined,
+      supplierName: supplierName,
+      // 如果修改了供应商名称，清除 supplierId，让系统重新查找或创建供应商
+      supplierId: undefined,
+      supplier: undefined,
     });
   };
 
@@ -293,11 +293,15 @@ export default function ReceiptDetailsScreen() {
     // Use the first available category as default
     const defaultCategory = categories.find(cat => cat.name === 'Shopping') || categories[0];
     
+    // Use the first available purpose as default, or null if no purposes
+    const defaultPurpose = purposes.length > 0 ? purposes[0] : null;
+    
     const newItem: ReceiptItem = {
       name: '',
       categoryId: defaultCategory.id,
       category: defaultCategory,
-      purpose: 'Personnel',
+      purposeId: defaultPurpose?.id || null,
+      purpose: defaultPurpose,
       price: 0,
       isAsset: false,
     };
@@ -506,14 +510,14 @@ export default function ReceiptDetailsScreen() {
                 {editing ? (
                   <TextInput
                     style={styles.storeNameInput}
-                    value={editedReceipt?.storeName || editedReceipt?.store?.name || currentReceipt.store?.name || currentReceipt.storeName || ''}
-                    onChangeText={handleStoreNameChange}
-                    placeholder="Store name"
+                    value={editedReceipt?.supplierName || editedReceipt?.supplier?.name || currentReceipt.supplier?.name || currentReceipt.supplierName || ''}
+                    onChangeText={handleSupplierNameChange}
+                    placeholder="Supplier name"
                     maxLength={100}
                   />
                 ) : (
                   <Text style={styles.storeName} numberOfLines={1}>
-                    {currentReceipt.store?.name || currentReceipt.storeName || 'Unknown Store'}
+                    {currentReceipt.supplier?.name || currentReceipt.supplierName || 'Unknown Supplier'}
                   </Text>
                 )}
                 <View style={styles.amountRow}>

@@ -14,8 +14,8 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { createHousehold, getCurrentUser, getUserHouseholds, signOut } from '@/lib/auth';
-import { getPendingInvitationsForUser, acceptInvitation, declineInvitation, HouseholdInvitation } from '@/lib/household-invitations';
+import { createSpace, getCurrentUser, getUserSpaces, signOut } from '@/lib/auth';
+import { getPendingInvitationsForUser, acceptInvitation, declineInvitation, SpaceInvitation } from '@/lib/space-invitations';
 import { supabase } from '@/lib/supabase';
 import { initializeAuthCache } from '@/lib/auth-cache';
 
@@ -23,13 +23,13 @@ export default function SetupHouseholdScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ inviteId?: string }>();
   const [loading, setLoading] = useState(true);
-  const [pendingInvitations, setPendingInvitations] = useState<HouseholdInvitation[]>([]);
-  const [selectedInvitation, setSelectedInvitation] = useState<HouseholdInvitation | null>(null);
-  const [householdNames, setHouseholdNames] = useState<Record<string, string>>({});
+  const [pendingInvitations, setPendingInvitations] = useState<SpaceInvitation[]>([]);
+  const [selectedInvitation, setSelectedInvitation] = useState<SpaceInvitation | null>(null);
+  const [spaceNames, setSpaceNames] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);
   const [accepting, setAccepting] = useState(false);
-  const [newHouseholdName, setNewHouseholdName] = useState('');
-  const [newHouseholdAddress, setNewHouseholdAddress] = useState('');
+  const [newSpaceName, setNewSpaceName] = useState('');
+  const [newSpaceAddress, setNewSpaceAddress] = useState('');
   const [mode, setMode] = useState<'invite' | 'create'>('invite'); // 'invite' 显示邀请，'create' 显示创建表单
 
   useEffect(() => {
@@ -52,31 +52,31 @@ export default function SetupHouseholdScreen() {
       const invitations = await getPendingInvitationsForUser();
       setPendingInvitations(invitations);
 
-      // 使用邀请数据中的家庭名称（已经在 getPendingInvitationsForUser 中通过 join 获取）
+      // 使用邀请数据中的空间名称（已经在 getPendingInvitationsForUser 中通过 join 获取）
       const names: Record<string, string> = {};
       invitations.forEach(invitation => {
-        if (invitation.householdName) {
-          names[invitation.householdId] = invitation.householdName;
+        if (invitation.spaceName) {
+          names[invitation.spaceId] = invitation.spaceName;
         }
       });
       
-      // 如果某些邀请没有家庭名称，尝试批量查询补充
-      const invitationsWithoutName = invitations.filter(inv => !inv.householdName);
+      // 如果某些邀请没有空间名称，尝试批量查询补充
+      const invitationsWithoutName = invitations.filter(inv => !inv.spaceName);
       if (invitationsWithoutName.length > 0) {
-        const householdIds = invitationsWithoutName.map(inv => inv.householdId);
-        const { data: households } = await supabase
-          .from('households')
+        const spaceIds = invitationsWithoutName.map(inv => inv.spaceId);
+        const { data: spaces } = await supabase
+          .from('spaces')
           .select('id, name')
-          .in('id', householdIds);
+          .in('id', spaceIds);
         
-        if (households) {
-          households.forEach(household => {
-            names[household.id] = household.name;
+        if (spaces) {
+          spaces.forEach(space => {
+            names[space.id] = space.name;
           });
         }
       }
       
-      setHouseholdNames(names);
+      setSpaceNames(names);
 
       // 始终优先显示创建模式（首位展示创建新家庭）
       // 如果有邀请，可以通过按钮切换到邀请模式
@@ -89,36 +89,36 @@ export default function SetupHouseholdScreen() {
     }
   };
 
-  const handleAcceptInvitation = async (invitation: HouseholdInvitation) => {
+  const handleAcceptInvitation = async (invitation: SpaceInvitation) => {
     setAccepting(true);
     try {
-      const { error } = await acceptInvitation(invitation.token);
+      const { error } = await acceptInvitation(invitation.id);
       if (error) {
-        Alert.alert('Error', error.message || 'Failed to join household');
+        Alert.alert('Error', error.message || 'Failed to join space');
         setAccepting(false);
         return;
       }
       
       // 更新缓存
-      const { getCurrentUser, getCurrentHousehold } = await import('@/lib/auth');
+      const { getCurrentUser, getCurrentSpace } = await import('@/lib/auth');
       const updatedUser = await getCurrentUser(true);
-      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
-      await initializeAuthCache(updatedUser, updatedHousehold);
+      const updatedSpace = updatedUser ? await getCurrentSpace(true) : null;
+      await initializeAuthCache(updatedUser, updatedSpace);
       
       // 接受邀请后直接跳转，不显示 Alert（更流畅的体验）
       setAccepting(false);
       router.replace('/');
     } catch (error) {
       console.error('Error accepting invitation:', error);
-      Alert.alert('Error', 'Failed to join household');
+      Alert.alert('Error', 'Failed to join space');
       setAccepting(false);
     }
   };
 
-  const handleDeclineInvitation = async (invitation: HouseholdInvitation) => {
+  const handleDeclineInvitation = async (invitation: SpaceInvitation) => {
     Alert.alert(
       'Decline Invitation',
-      `Are you sure you want to decline the invitation to join ${householdNames[invitation.householdId] || 'this household'}?`,
+      `Are you sure you want to decline the invitation to join ${spaceNames[invitation.spaceId] || 'this space'}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -126,7 +126,7 @@ export default function SetupHouseholdScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await declineInvitation(invitation.token);
+              const { error } = await declineInvitation(invitation.id);
               if (error) {
                 Alert.alert('Error', error.message || 'Failed to decline invitation');
                 return;
@@ -141,19 +141,19 @@ export default function SetupHouseholdScreen() {
                 setSelectedInvitation(null);
               }
               
-              // 检查用户是否有其他家庭（区分新用户和老用户）
-              const households = await getUserHouseholds();
+              // 检查用户是否有其他空间（区分新用户和老用户）
+              const spaces = await getUserSpaces();
               
-              if (households.length === 0) {
-                // 新用户：没有家庭，切换到创建模式
+              if (spaces.length === 0) {
+                // 新用户：没有空间，切换到创建模式
                 if (remainingInvitations.length === 0) {
                   // 没有更多邀请，直接显示创建表单
                   setMode('create');
                 } else {
-                  // 还有邀请，但用户选择拒绝，询问是否创建家庭
+                  // 还有邀请，但用户选择拒绝，询问是否创建空间
                   Alert.alert(
-                    'Create Your Own Household',
-                    'You declined the invitation. Would you like to create your own household?',
+                    'Create Your Own Space',
+                    'You declined the invitation. Would you like to create your own space?',
                     [
                       { text: 'Later', style: 'cancel' },
                       {
@@ -164,12 +164,12 @@ export default function SetupHouseholdScreen() {
                   );
                 }
               } else {
-                // 老用户：有家庭，跳转回首页（登录到上次登录的家庭）
+                // 老用户：有空间，跳转回首页（登录到上次登录的空间）
                 // 更新缓存
                 const updatedUser = await getCurrentUser(true);
-                const { getCurrentHousehold } = await import('@/lib/auth');
-                const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
-                await initializeAuthCache(updatedUser, updatedHousehold);
+                const { getCurrentSpace } = await import('@/lib/auth');
+                const updatedSpace = updatedUser ? await getCurrentSpace(true) : null;
+                await initializeAuthCache(updatedUser, updatedSpace);
                 
                 router.replace('/');
               }
@@ -183,17 +183,17 @@ export default function SetupHouseholdScreen() {
     );
   };
 
-  const handleCreateHousehold = async () => {
-    if (!newHouseholdName.trim()) {
-      Alert.alert('Error', 'Please enter household name');
+  const handleCreateSpace = async () => {
+    if (!newSpaceName.trim()) {
+      Alert.alert('Error', 'Please enter space name');
       return;
     }
 
     setCreating(true);
     try {
-      const { household, error } = await createHousehold(
-        newHouseholdName.trim(),
-        newHouseholdAddress.trim() || undefined
+      const { space, error } = await createSpace(
+        newSpaceName.trim(),
+        newSpaceAddress.trim() || undefined
       );
 
       if (error) {
@@ -201,31 +201,31 @@ export default function SetupHouseholdScreen() {
         if (error.message?.includes('confirm your email') || error.message?.includes('email confirmation')) {
           Alert.alert(
             'Email Confirmation Required',
-            'Please confirm your email address first, then try creating a household again. Check your email inbox for the confirmation link.',
+            'Please confirm your email address first, then try creating a space again. Check your email inbox for the confirmation link.',
             [
               { text: 'OK', onPress: () => router.replace('/login') }
             ]
           );
         } else {
-          Alert.alert('Error', error.message || 'Failed to create household');
+          Alert.alert('Error', error.message || 'Failed to create space');
         }
         setCreating(false);
         return;
       }
 
-      if (household) {
-        // 更新缓存（使用已创建的household，避免再次查询）
+      if (space) {
+        // 更新缓存（使用已创建的空间，避免再次查询）
         const { getCurrentUser } = await import('@/lib/auth');
         const updatedUser = await getCurrentUser(); // 不强制刷新，使用缓存或快速查询
-        await initializeAuthCache(updatedUser, household);
+        await initializeAuthCache(updatedUser, space);
         
-        // 创建家庭后直接跳转，不显示 Alert（更流畅的体验）
+        // 创建空间后直接跳转，不显示 Alert（更流畅的体验）
         setCreating(false);
         router.replace('/');
       }
     } catch (error) {
-      console.error('Error creating household:', error);
-      Alert.alert('Error', 'Failed to create household');
+      console.error('Error creating space:', error);
+      Alert.alert('Error', 'Failed to create space');
       setCreating(false);
     }
   };
@@ -290,8 +290,8 @@ export default function SetupHouseholdScreen() {
               <Ionicons name="home" size={60} color="#6C5CE7" />
             </View>
           </View>
-          <Text style={styles.title}>Setup Household</Text>
-          <Text style={styles.subtitle}>Create your household to get started</Text>
+          <Text style={styles.title}>Setup Space</Text>
+          <Text style={styles.subtitle}>Create your space to get started</Text>
         </View>
 
         {/* 创建模式 - 首位展示 */}
@@ -301,10 +301,10 @@ export default function SetupHouseholdScreen() {
               <Ionicons name="home-outline" size={20} color="#636E72" style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Household Name *"
+                placeholder="Space Name *"
                 placeholderTextColor="#95A5A6"
-                value={newHouseholdName}
-                onChangeText={setNewHouseholdName}
+                value={newSpaceName}
+                onChangeText={setNewSpaceName}
               />
             </View>
 
@@ -314,8 +314,8 @@ export default function SetupHouseholdScreen() {
                 style={[styles.input, styles.addressInput]}
                 placeholder="Address (Optional)"
                 placeholderTextColor="#95A5A6"
-                value={newHouseholdAddress}
-                onChangeText={setNewHouseholdAddress}
+                value={newSpaceAddress}
+                onChangeText={setNewSpaceAddress}
                 multiline
                 textAlignVertical="top"
               />
@@ -323,8 +323,8 @@ export default function SetupHouseholdScreen() {
 
             <TouchableOpacity
               style={[styles.createButton, creating && styles.buttonDisabled]}
-              onPress={handleCreateHousehold}
-              disabled={creating || !newHouseholdName.trim()}
+              onPress={handleCreateSpace}
+              disabled={creating || !newSpaceName.trim()}
             >
             {creating ? (
               <ActivityIndicator color="#fff" />

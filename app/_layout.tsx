@@ -82,7 +82,7 @@ export default function RootLayout() {
           }} 
         />
         <Stack.Screen 
-          name="household-members" 
+          name="space-members" 
           options={{ 
             title: 'Space Members',
             headerBackTitle: 'Back',
@@ -98,7 +98,7 @@ export default function RootLayout() {
           }} 
         />
         <Stack.Screen 
-          name="household-manage" 
+          name="space-manage" 
           options={{ 
             title: 'Space Information'
           }} 
@@ -118,7 +118,7 @@ export default function RootLayout() {
           }} 
         />
         <Stack.Screen 
-          name="household-select" 
+          name="space-select" 
           options={{ 
             headerShown: false
           }} 
@@ -148,7 +148,7 @@ export default function RootLayout() {
           }} 
         />
         <Stack.Screen 
-          name="setup-household" 
+          name="setup-space" 
           options={{ 
             headerShown: false
           }} 

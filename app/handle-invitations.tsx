@@ -11,9 +11,9 @@ import {
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { getCurrentUser, getCurrentHousehold, setCurrentHousehold, getUserHouseholds } from '@/lib/auth';
+import { getCurrentUser, getCurrentSpace, setCurrentSpace, getUserSpaces } from '@/lib/auth';
 import { initializeAuthCache } from '@/lib/auth-cache';
-import { getPendingInvitationsForUser, acceptInvitation, declineInvitation } from '@/lib/household-invitations';
+import { getPendingInvitationsForUser, acceptInvitation, declineInvitation } from '@/lib/space-invitations';
 import { supabase } from '@/lib/supabase';
 
 export default function HandleInvitationsScreen() {
@@ -21,11 +21,11 @@ export default function HandleInvitationsScreen() {
   const [loading, setLoading] = useState(true);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteId, setInviteId] = useState<string | null>(null);
-  const [inviteHouseholdId, setInviteHouseholdId] = useState<string | null>(null);
-  const [householdName, setHouseholdName] = useState('');
+  const [inviteSpaceId, setInviteSpaceId] = useState<string | null>(null);
+  const [spaceName, setSpaceName] = useState('');
   const [inviterEmail, setInviterEmail] = useState('');
   const [acceptingInvite, setAcceptingInvite] = useState(false);
-  const [pendingInvitations, setPendingInvitations] = useState<Array<{ id: string; householdId: string; name: string; inviterEmail?: string; householdName?: string }>>([]);
+  const [pendingInvitations, setPendingInvitations] = useState<Array<{ id: string; spaceId: string; name: string; inviterEmail?: string; spaceName?: string }>>([]);
   const [currentInvitationIndex, setCurrentInvitationIndex] = useState(0);
 
   useEffect(() => {
@@ -52,30 +52,30 @@ export default function HandleInvitationsScreen() {
         return;
       }
 
-      // 直接使用邀请数据中的家庭名称和邀请者email（已经在 getPendingInvitationsForUser 中从数据库获取）
-      // 不再需要查询households表，因为household_name已经存储在邀请记录中
-      const invitationsWithNames: Array<{ id: string; householdId: string; name: string; inviterEmail?: string; householdName?: string }> = [];
+      // 直接使用邀请数据中的空间名称和邀请者email（已经在 getPendingInvitationsForUser 中从数据库获取）
+      // 不再需要查询spaces表，因为space_name已经存储在邀请记录中
+      const invitationsWithNames: Array<{ id: string; spaceId: string; name: string; inviterEmail?: string; spaceName?: string }> = [];
       
       for (const invitation of invitations) {
-        // 直接使用从数据库获取的household_name，不再查询households表
-        const householdName = invitation.householdName || 'Unknown Space';
+        // 直接使用从数据库获取的space_name，不再查询spaces表
+        const spaceName = invitation.spaceName || 'Unknown Space';
         
         console.log('Processing invitation:', {
           id: invitation.id,
-          householdName: householdName,
+          spaceName: spaceName,
           inviterEmail: invitation.inviterEmail,
         });
         
         invitationsWithNames.push({
           id: invitation.id,
-          householdId: invitation.householdId,
-          name: householdName, // 使用从数据库获取的家庭名称
+          spaceId: invitation.spaceId,
+          name: spaceName, // 使用从数据库获取的空间名称
           inviterEmail: invitation.inviterEmail,
-          householdName: householdName, // 保存完整的家庭名称
+          spaceName: spaceName, // 保存完整的空间名称
         });
       }
       
-      // 如果没有获取到家庭名称或邀请者email，记录警告
+      // 如果没有获取到空间名称或邀请者email，记录警告
       const invitationsWithoutInfo = invitationsWithNames.filter(inv => inv.name === 'Unknown Space' || !inv.inviterEmail);
       if (invitationsWithoutInfo.length > 0) {
         console.warn('Some invitations missing info:', invitationsWithoutInfo);
@@ -94,7 +94,7 @@ export default function HandleInvitationsScreen() {
     }
   };
 
-  const showNextInvitation = (index: number, invitations: Array<{ id: string; householdId: string; name: string; inviterEmail?: string; householdName?: string }>) => {
+  const showNextInvitation = (index: number, invitations: Array<{ id: string; spaceId: string; name: string; inviterEmail?: string; spaceName?: string }>) => {
     if (index < invitations.length) {
       const invitation = invitations[index];
       
@@ -102,16 +102,16 @@ export default function HandleInvitationsScreen() {
       console.log('Showing invitation:', {
         index,
         name: invitation.name,
-        householdName: invitation.householdName,
+        spaceName: invitation.spaceName,
         inviterEmail: invitation.inviterEmail,
-        householdId: invitation.householdId,
+        spaceId: invitation.spaceId,
       });
       
-      // 使用householdName字段（如果存在），否则使用name字段作为fallback
-      setHouseholdName(invitation.householdName || invitation.name || 'Unknown Space');
+      // 使用spaceName字段（如果存在），否则使用name字段作为fallback
+      setSpaceName(invitation.spaceName || invitation.name || 'Unknown Space');
       setInviterEmail(invitation.inviterEmail || '');
       setInviteId(invitation.id);
-      setInviteHouseholdId(invitation.householdId);
+      setInviteSpaceId(invitation.spaceId);
       setShowInviteModal(true);
     } else {
       // 所有邀请都处理完了
@@ -127,45 +127,45 @@ export default function HandleInvitationsScreen() {
     try {
       console.log('continueAfterInvitations: Starting...');
       
-      // 检查用户是否有当前家庭（使用缓存，如果缓存未初始化则从数据库读取）
-      const user = await getCurrentUser(true); // 强制刷新，确保获取最新的currentHouseholdId
+      // 检查用户是否有当前空间（使用缓存，如果缓存未初始化则从数据库读取）
+      const user = await getCurrentUser(true); // 强制刷新，确保获取最新的currentSpaceId
       console.log('continueAfterInvitations: User:', {
         id: user?.id,
-        currentHouseholdId: user?.currentHouseholdId,
-        householdId: user?.householdId,
+        currentSpaceId: user?.currentSpaceId,
+        spaceId: user?.spaceId,
       });
       
       if (!user) {
-        console.log('continueAfterInvitations: No user, redirecting to setup-household');
-        router.replace('/setup-household');
+        console.log('continueAfterInvitations: No user, redirecting to setup-space');
+        router.replace('/setup-space');
         return;
       }
 
-      // 检查用户是否有家庭（区分新用户和老用户）
-      const households = await getUserHouseholds();
-      console.log('continueAfterInvitations: Households:', {
-        count: households.length,
-        householdIds: households.map(h => h.householdId),
+      // 检查用户是否有空间（区分新用户和老用户）
+      const spaces = await getUserSpaces();
+      console.log('continueAfterInvitations: Spaces:', {
+        count: spaces.length,
+        spaceIds: spaces.map(s => s.spaceId),
       });
       
-      // 新用户：没有家庭，跳转到设置家庭页面（创建家庭）
-      if (households.length === 0) {
-        console.log('continueAfterInvitations: No households, redirecting to setup-household');
-        router.replace('/setup-household');
+      // 新用户：没有空间，跳转到设置空间页面（创建空间）
+      if (spaces.length === 0) {
+        console.log('continueAfterInvitations: No spaces, redirecting to setup-space');
+        router.replace('/setup-space');
         return;
       }
 
-      // 老用户：有家庭
-      // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用（登录到上次登录的家庭）
+      // 老用户：有空间
+      // 如果用户已经有当前空间（currentSpaceId 或 spaceId），直接进入应用（登录到上次登录的空间）
       // 即使有 pending invitations，也允许用户进入应用（用户可以通过 Later 按钮忽略邀请）
-      if (user.currentHouseholdId || user.householdId) {
-        const targetHouseholdId = user.currentHouseholdId || user.householdId;
-        console.log('continueAfterInvitations: User has current household, redirecting to home (ignoring pending invitations):', targetHouseholdId);
+      if (user.currentSpaceId || user.spaceId) {
+        const targetSpaceId = user.currentSpaceId || user.spaceId;
+        console.log('continueAfterInvitations: User has current space, redirecting to home (ignoring pending invitations):', targetSpaceId);
         
         // 确保缓存已更新
         try {
-          const updatedHousehold = await getCurrentHousehold(true);
-          await initializeAuthCache(user, updatedHousehold);
+          const updatedSpace = await getCurrentSpace(true);
+          await initializeAuthCache(user, updatedSpace);
         } catch (cacheError) {
           console.warn('continueAfterInvitations: Cache update failed, continuing:', cacheError);
         }
@@ -174,17 +174,17 @@ export default function HandleInvitationsScreen() {
         return;
       }
 
-      // 老用户：有家庭但没有当前家庭
-      if (households.length === 1) {
-        // 只有一个家庭，自动设置并进入（这就是上次登录的家庭）
-        console.log('continueAfterInvitations: Setting single household:', households[0].householdId);
-        await setCurrentHousehold(households[0].householdId);
+      // 老用户：有空间但没有当前空间
+      if (spaces.length === 1) {
+        // 只有一个空间，自动设置并进入（这就是上次登录的空间）
+        console.log('continueAfterInvitations: Setting single space:', spaces[0].spaceId);
+        await setCurrentSpace(spaces[0].spaceId);
         
-        // 更新缓存（强制刷新，确保获取最新的currentHouseholdId）
+        // 更新缓存（强制刷新，确保获取最新的currentSpaceId）
         try {
           const updatedUser = await getCurrentUser(true);
-          const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
-          await initializeAuthCache(updatedUser, updatedHousehold);
+          const updatedSpace = updatedUser ? await getCurrentSpace(true) : null;
+          await initializeAuthCache(updatedUser, updatedSpace);
           console.log('continueAfterInvitations: Cache updated, redirecting to home');
         } catch (cacheError) {
           console.warn('continueAfterInvitations: Cache update failed, continuing:', cacheError);
@@ -193,20 +193,20 @@ export default function HandleInvitationsScreen() {
         router.replace('/');
         return;
       } else {
-        // 多个家庭但没有当前家庭，跳转到家庭选择页面
-        console.log('continueAfterInvitations: Multiple households, redirecting to household-select');
-        router.replace('/household-select');
+        // 多个空间但没有当前空间，跳转到空间选择页面
+        console.log('continueAfterInvitations: Multiple spaces, redirecting to space-select');
+        router.replace('/space-select');
         return;
       }
     } catch (error) {
       console.error('Error in continueAfterInvitations:', error);
       // 如果出错，默认跳转到设置家庭页面
-      router.replace('/setup-household');
+      router.replace('/setup-space');
     }
   };
 
   const handleAcceptInvitation = async () => {
-    if (!inviteId || !inviteHouseholdId) return;
+    if (!inviteId || !inviteSpaceId) return;
 
     setAcceptingInvite(true);
     try {
@@ -218,17 +218,17 @@ export default function HandleInvitationsScreen() {
         return;
       }
 
-      // 接受邀请后，自动切换到新加入的家庭
-      const { error: switchError } = await setCurrentHousehold(inviteHouseholdId);
+      // 接受邀请后，自动切换到新加入的空间
+      const { error: switchError } = await setCurrentSpace(inviteSpaceId);
       if (switchError) {
-        // 即使切换失败，也继续，因为用户已经加入了家庭
+        // 即使切换失败，也继续，因为用户已经加入了空间
       }
 
       // 更新缓存（不强制刷新，避免权限错误）
       try {
         const updatedUser = await getCurrentUser();
-        const updatedHousehold = updatedUser ? await getCurrentHousehold() : null;
-        await initializeAuthCache(updatedUser, updatedHousehold);
+        const updatedSpace = updatedUser ? await getCurrentSpace() : null;
+        await initializeAuthCache(updatedUser, updatedSpace);
       } catch (cacheError) {
         // 继续流程，缓存错误不影响主流程
       }
@@ -236,17 +236,17 @@ export default function HandleInvitationsScreen() {
       // 关闭当前邀请对话框
       setShowInviteModal(false);
       setInviteId(null);
-      setInviteHouseholdId(null);
+      setInviteSpaceId(null);
       setAcceptingInvite(false);
 
-      // 接受邀请后，直接进入邀请家庭到index（acceptInvitation已经自动设置了当前家庭）
+      // 接受邀请后，直接进入邀请空间到index（acceptInvitation已经自动设置了当前空间）
       console.log('handleAcceptInvitation: Invitation accepted, redirecting to index');
       
-      // 更新缓存（强制刷新，确保获取最新的currentHouseholdId）
+      // 更新缓存（强制刷新，确保获取最新的currentSpaceId）
       try {
         const updatedUser = await getCurrentUser(true);
-        const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
-        await initializeAuthCache(updatedUser, updatedHousehold);
+        const updatedSpace = updatedUser ? await getCurrentSpace(true) : null;
+        await initializeAuthCache(updatedUser, updatedSpace);
       } catch (cacheError) {
         console.warn('handleAcceptInvitation: Cache update failed, continuing:', cacheError);
       }
@@ -274,7 +274,7 @@ export default function HandleInvitationsScreen() {
     if (!inviteId) {
       setShowInviteModal(false);
       setInviteId(null);
-      setInviteHouseholdId(null);
+      setInviteSpaceId(null);
       // 检查是否还有更多邀请
       const nextIndex = currentInvitationIndex + 1;
       if (nextIndex < pendingInvitations.length) {
@@ -301,7 +301,7 @@ export default function HandleInvitationsScreen() {
       // 关闭当前邀请对话框
       setShowInviteModal(false);
       setInviteId(null);
-      setInviteHouseholdId(null);
+      setInviteSpaceId(null);
       
       // 检查是否还有更多邀请需要处理
       const nextIndex = currentInvitationIndex + 1;
@@ -321,28 +321,28 @@ export default function HandleInvitationsScreen() {
   const handleLaterInvitation = async () => {
     // 后续处理：关闭对话框，不处理邀请
     // 根据用户类型（新/老）执行不同流程：
-    // - 新用户（无家庭）：跳转到创建家庭页面
-    // - 老用户（有家庭）：登录到上次登录的家庭
+    // - 新用户（无空间）：跳转到创建空间页面
+    // - 老用户（有空间）：登录到上次登录的空间
     console.log('handleLaterInvitation: Called');
     
     setShowInviteModal(false);
     setInviteId(null);
-    setInviteHouseholdId(null);
+    setInviteSpaceId(null);
     
-    // 检查用户是否已有关联家庭
+    // 检查用户是否已有关联空间
     try {
       const user = await getCurrentUser(true);
-      const households = await getUserHouseholds();
+      const spaces = await getUserSpaces();
       
-      // 如果用户已有关联家庭，直接跳转到 index（忽略 pending invitations）
-      if (households.length > 0) {
-        // 如果有当前家庭，直接进入
-        if (user?.currentHouseholdId || user?.householdId) {
-          console.log('handleLaterInvitation: User has current household, redirecting to index');
+      // 如果用户已有关联空间，直接跳转到 index（忽略 pending invitations）
+      if (spaces.length > 0) {
+        // 如果有当前空间，直接进入
+        if (user?.currentSpaceId || user?.spaceId) {
+          console.log('handleLaterInvitation: User has current space, redirecting to index');
           // 更新缓存
           try {
-            const updatedHousehold = await getCurrentHousehold(true);
-            await initializeAuthCache(user, updatedHousehold);
+            const updatedSpace = await getCurrentSpace(true);
+            await initializeAuthCache(user, updatedSpace);
           } catch (cacheError) {
             console.warn('handleLaterInvitation: Cache update failed, continuing:', cacheError);
           }
@@ -350,15 +350,15 @@ export default function HandleInvitationsScreen() {
           return;
         }
         
-        // 如果只有一个家庭，自动设置并进入
-        if (households.length === 1) {
-          console.log('handleLaterInvitation: Setting single household and redirecting to index');
-          await setCurrentHousehold(households[0].householdId);
+        // 如果只有一个空间，自动设置并进入
+        if (spaces.length === 1) {
+          console.log('handleLaterInvitation: Setting single space and redirecting to index');
+          await setCurrentSpace(spaces[0].spaceId);
           // 更新缓存
           try {
             const updatedUser = await getCurrentUser(true);
-            const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
-            await initializeAuthCache(updatedUser, updatedHousehold);
+            const updatedSpace = updatedUser ? await getCurrentSpace(true) : null;
+            await initializeAuthCache(updatedUser, updatedSpace);
           } catch (cacheError) {
             console.warn('handleLaterInvitation: Cache update failed, continuing:', cacheError);
           }
@@ -366,18 +366,18 @@ export default function HandleInvitationsScreen() {
           return;
         }
         
-        // 多个家庭，跳转到家庭选择页面
-        if (households.length > 1) {
-          console.log('handleLaterInvitation: Multiple households, redirecting to household-select');
-          router.replace('/household-select');
+        // 多个空间，跳转到空间选择页面
+        if (spaces.length > 1) {
+          console.log('handleLaterInvitation: Multiple spaces, redirecting to space-select');
+          router.replace('/space-select');
           return;
         }
       }
     } catch (error) {
-      console.error('Error checking user households in handleLaterInvitation:', error);
+      console.error('Error checking user spaces in handleLaterInvitation:', error);
     }
     
-    // 如果没有家庭，继续处理邀请或跳转到 setup-household
+    // 如果没有空间，继续处理邀请或跳转到 setup-space
     // 检查是否还有更多邀请
     const nextIndex = currentInvitationIndex + 1;
     if (nextIndex < pendingInvitations.length) {
@@ -386,11 +386,11 @@ export default function HandleInvitationsScreen() {
       setCurrentInvitationIndex(nextIndex);
       showNextInvitation(nextIndex, pendingInvitations);
     } else {
-      // 所有邀请都处理完了，跳转到 setup-household（新用户需要创建家庭）
-      console.log('handleLaterInvitation: All invitations processed, redirecting to setup-household');
+      // 所有邀请都处理完了，跳转到 setup-space（新用户需要创建空间）
+      console.log('handleLaterInvitation: All invitations processed, redirecting to setup-space');
       setPendingInvitations([]);
       setCurrentInvitationIndex(0);
-      router.replace('/setup-household');
+      router.replace('/setup-space');
     }
   };
 
@@ -519,10 +519,10 @@ export default function HandleInvitationsScreen() {
                   <Text style={styles.inviterEmailMain}>Someone</Text>
                 )}
                 <Text style={styles.inviterEmailLabel}>has invited you to join Space</Text>
-                {/* 突出显示家庭名称 */}
-                {householdName && householdName !== 'Unknown Space' && (
+                {/* 突出显示空间名称 */}
+                {spaceName && spaceName !== 'Unknown Space' && (
                   <View style={styles.householdNameContainer}>
-                    <Text style={styles.householdNameText}>{householdName}</Text>
+                    <Text style={styles.householdNameText}>{spaceName}</Text>
                   </View>
                 )}
               </View>

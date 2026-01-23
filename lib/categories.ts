@@ -2,20 +2,20 @@ import { supabase } from './supabase';
 import { Category } from '@/types';
 import { getCurrentUser } from './auth';
 
-// 获取当前家庭的所有分类
+// 获取当前空间的所有分类
 export async function getCategories(): Promise<Category[]> {
   try {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     const { data, error } = await supabase
       .from('categories')
       .select('*')
-      .eq('household_id', householdId)
+      .eq('space_id', spaceId)
       .order('is_default', { ascending: false })
       .order('name', { ascending: true });
 
@@ -23,7 +23,7 @@ export async function getCategories(): Promise<Category[]> {
 
     return (data || []).map((row: any) => ({
       id: row.id,
-      householdId: row.household_id,
+      spaceId: row.space_id,
       name: row.name,
       color: row.color,
       isDefault: row.is_default,
@@ -42,14 +42,14 @@ export async function createCategory(name: string, color: string = '#95A5A6'): P
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     const { data, error } = await supabase
       .from('categories')
       .insert({
-        household_id: householdId,
+        space_id: spaceId,
         name: name.trim(),
         color: color,
         is_default: false,
@@ -61,7 +61,7 @@ export async function createCategory(name: string, color: string = '#95A5A6'): P
 
     return {
       id: data.id,
-      householdId: data.household_id,
+      spaceId: data.space_id,
       name: data.name,
       color: data.color,
       isDefault: data.is_default,
@@ -84,15 +84,15 @@ export async function updateCategory(categoryId: string, updates: { name?: strin
     if (updates.name !== undefined) updateData.name = updates.name.trim();
     if (updates.color !== undefined) updateData.color = updates.color;
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     const { error } = await supabase
       .from('categories')
       .update(updateData)
       .eq('id', categoryId)
-      .eq('household_id', householdId);
+      .eq('space_id', spaceId);
 
     if (error) throw error;
   } catch (error) {
@@ -107,16 +107,16 @@ export async function deleteCategory(categoryId: string): Promise<void> {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     // 检查是否为默认分类
     const { data: category, error: fetchError } = await supabase
       .from('categories')
       .select('is_default')
       .eq('id', categoryId)
-      .eq('household_id', householdId)
+      .eq('space_id', spaceId)
       .single();
 
     if (fetchError) throw fetchError;
@@ -128,7 +128,7 @@ export async function deleteCategory(categoryId: string): Promise<void> {
       .from('categories')
       .delete()
       .eq('id', categoryId)
-      .eq('household_id', householdId);
+      .eq('space_id', spaceId);
 
     if (error) throw error;
   } catch (error) {
@@ -143,14 +143,14 @@ export async function findCategoryByName(name: string): Promise<Category | null>
     const user = await getCurrentUser();
     if (!user) return null;
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) return null;
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) return null;
 
     const { data, error } = await supabase
       .from('categories')
       .select('*')
-      .eq('household_id', householdId)
+      .eq('space_id', spaceId)
       .ilike('name', name.trim())
       .limit(1)
       .single();
@@ -162,7 +162,7 @@ export async function findCategoryByName(name: string): Promise<Category | null>
 
     return {
       id: data.id,
-      householdId: data.household_id,
+      spaceId: data.space_id,
       name: data.name,
       color: data.color,
       isDefault: data.is_default,
@@ -185,15 +185,15 @@ export async function mergeCategory(sourceCategoryId: string, targetCategoryId: 
       throw new Error('Cannot merge category to itself');
     }
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     // 验证两个分类都属于当前家庭
     const { data: categories, error: fetchError } = await supabase
       .from('categories')
       .select('*')
-      .eq('household_id', householdId)
+      .eq('space_id', spaceId)
       .in('id', [sourceCategoryId, targetCategoryId]);
 
     if (fetchError) throw fetchError;
@@ -213,7 +213,7 @@ export async function mergeCategory(sourceCategoryId: string, targetCategoryId: 
     const { data: receipts, error: receiptsError } = await supabase
       .from('receipts')
       .select('id')
-      .eq('household_id', householdId);
+      .eq('space_id', spaceId);
 
     if (receiptsError) throw receiptsError;
 
@@ -247,7 +247,7 @@ export async function mergeCategory(sourceCategoryId: string, targetCategoryId: 
       .from('categories')
       .delete()
       .eq('id', sourceCategoryId)
-      .eq('household_id', householdId);
+      .eq('space_id', spaceId);
 
     if (deleteError) throw deleteError;
   } catch (error) {

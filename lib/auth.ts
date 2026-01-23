@@ -1,8 +1,8 @@
 import { supabase, validateSupabaseConfig } from './supabase';
-import { User, Household, UserHousehold } from '@/types';
+import { User, Space, UserSpace } from '@/types';
 import { createDefaultCategoriesAndAccounts } from './auth-helper';
 import Constants from 'expo-constants';
-import { getCachedUser, updateCachedUser, getCachedHousehold, updateCachedHousehold } from './auth-cache';
+import { getCachedUser, updateCachedUser, getCachedSpace, updateCachedSpace } from './auth-cache';
 
 // 获取当前用户（优先使用缓存）
 export async function getCurrentUser(forceRefresh: boolean = false): Promise<User | null> {
@@ -89,7 +89,7 @@ export async function getCurrentUser(forceRefresh: boolean = false): Promise<Use
           id: authUser.id,
           email: authUser.email || '',
           name: userName,
-          current_household_id: null,
+          current_space_id: null,
         });
       
       if (insertError) {
@@ -120,8 +120,8 @@ export async function getCurrentUser(forceRefresh: boolean = false): Promise<Use
           id: retryData.id,
           email: retryData.email,
           name: retryData.name,
-          householdId: retryData.current_household_id || null,
-          currentHouseholdId: retryData.current_household_id,
+          spaceId: retryData.current_space_id || null,
+          currentSpaceId: retryData.current_space_id,
           createdAt: retryData.created_at,
         };
         updateCachedUser(user);
@@ -145,21 +145,21 @@ export async function getCurrentUser(forceRefresh: boolean = false): Promise<Use
         id: newData.id,
         email: newData.email,
         name: newData.name,
-        householdId: newData.current_household_id || null,
-        currentHouseholdId: newData.current_household_id,
+        spaceId: newData.current_space_id || null,
+        currentSpaceId: newData.current_space_id,
         createdAt: newData.created_at,
       };
       updateCachedUser(user);
       return user;
     }
 
-    // 使用 current_household_id（household_id 字段已删除）
+    // 使用 current_space_id（space_id 字段已删除）
     const user: User = {
       id: data.id,
       email: data.email,
       name: data.name,
-      householdId: data.current_household_id || null, // 返回当前活动的家庭ID
-      currentHouseholdId: data.current_household_id,
+      spaceId: data.current_space_id || null, // 返回当前活动的空间ID
+      currentSpaceId: data.current_space_id,
       createdAt: data.created_at,
     };
 
@@ -174,10 +174,10 @@ export async function getCurrentUser(forceRefresh: boolean = false): Promise<Use
 }
 
 // 获取当前用户的家庭信息（优先使用缓存）
-export async function getCurrentHousehold(forceRefresh: boolean = false): Promise<Household | null> {
+export async function getCurrentSpace(forceRefresh: boolean = false): Promise<Space | null> {
   // 如果强制刷新或缓存未初始化，从数据库读取
   if (!forceRefresh) {
-    const cached = getCachedHousehold();
+    const cached = getCachedSpace();
     if (cached) {
       return cached;
     }
@@ -192,7 +192,7 @@ export async function getCurrentHousehold(forceRefresh: boolean = false): Promis
       // 如果是权限错误，记录警告但继续
       if (userError?.code === '42501' || userError?.message?.includes('permission denied')) {
         console.warn('Permission error getting user, RLS policy may need to be fixed:', userError.message);
-        updateCachedHousehold(null);
+        updateCachedSpace(null);
         return null;
       }
       // 其他错误继续抛出
@@ -200,38 +200,38 @@ export async function getCurrentHousehold(forceRefresh: boolean = false): Promis
     }
     
     if (!user) {
-      updateCachedHousehold(null);
+      updateCachedSpace(null);
       return null;
     }
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) {
-      updateCachedHousehold(null);
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) {
+      updateCachedSpace(null);
       return null;
     }
 
     const { data, error } = await supabase
-      .from('households')
+      .from('spaces')
       .select('*')
-      .eq('id', householdId)
+      .eq('id', spaceId)
       .single();
 
     if (error) {
       // 如果是权限错误，记录但不抛出
       if (error.code === '42501' || error.message?.includes('permission denied')) {
-        updateCachedHousehold(null);
+        updateCachedSpace(null);
         return null;
       }
       throw error;
     }
     
     if (!data) {
-      updateCachedHousehold(null);
+      updateCachedSpace(null);
       return null;
     }
 
-    const household: Household = {
+    const space: Space = {
       id: data.id,
       name: data.name,
       address: data.address,
@@ -240,26 +240,26 @@ export async function getCurrentHousehold(forceRefresh: boolean = false): Promis
     };
 
     // 更新缓存
-    updateCachedHousehold(household);
-    return household;
+    updateCachedSpace(space);
+    return space;
   } catch (error) {
-    console.error('Error getting current household:', error);
-    updateCachedHousehold(null);
+    console.error('Error getting current space:', error);
+    updateCachedSpace(null);
     return null;
   }
 }
 
-// 获取用户的所有家庭列表
-export async function getUserHouseholds(): Promise<UserHousehold[]> {
+// 获取用户的所有空间列表
+export async function getUserSpaces(): Promise<UserSpace[]> {
   try {
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) return [];
 
     const { data, error } = await supabase
-      .from('user_households')
+      .from('user_spaces')
       .select(`
         *,
-        households (*)
+        spaces (*)
       `)
       .eq('user_id', authUser.id)
       .order('created_at', { ascending: false });
@@ -270,65 +270,65 @@ export async function getUserHouseholds(): Promise<UserHousehold[]> {
     return data.map((row: any) => ({
       id: row.id,
       userId: row.user_id,
-      householdId: row.household_id,
-      household: row.households ? {
-        id: row.households.id,
-        name: row.households.name,
-        address: row.households.address,
-        createdAt: row.households.created_at,
-        updatedAt: row.households.updated_at,
+      spaceId: row.space_id,
+      space: row.spaces ? {
+        id: row.spaces.id,
+        name: row.spaces.name,
+        address: row.spaces.address,
+        createdAt: row.spaces.created_at,
+        updatedAt: row.spaces.updated_at,
       } : undefined,
       createdAt: row.created_at,
     }));
   } catch (error) {
-    console.error('Error getting user households:', error);
+    console.error('Error getting user spaces:', error);
     return [];
   }
 }
 
-// 设置当前活动的家庭
-export async function setCurrentHousehold(householdId: string): Promise<{ error: Error | null }> {
+// 设置当前活动的空间
+export async function setCurrentSpace(spaceId: string): Promise<{ error: Error | null }> {
   try {
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) {
       return { error: new Error('Not authenticated') };
     }
 
-    // 验证用户是否属于该家庭
+    // 验证用户是否属于该空间
     const { data: association, error: checkError } = await supabase
-      .from('user_households')
+      .from('user_spaces')
       .select('id')
       .eq('user_id', authUser.id)
-      .eq('household_id', householdId)
+      .eq('space_id', spaceId)
       .single();
 
     if (checkError || !association) {
-      return { error: new Error('User does not belong to this household') };
+      return { error: new Error('User does not belong to this space') };
     }
 
-    // 更新用户的当前家庭
+    // 更新用户的当前空间
     // 优先使用 RPC 函数绕过 RLS 限制
     let updateError: any = null;
     try {
       const { error: rpcError } = await supabase
-        .rpc('update_user_current_household', {
+        .rpc('update_user_current_space', {
           p_user_id: authUser.id,
-          p_household_id: householdId
+          p_space_id: spaceId
         });
       
       if (rpcError) {
         // 检查是否是函数不存在错误
         const isFunctionNotFound = rpcError.code === '42883' || rpcError.message?.includes('function') || rpcError.message?.includes('does not exist');
         if (isFunctionNotFound) {
-          console.warn('⚠️  RPC function update_user_current_household not found. Please execute create-users-rpc-functions.sql');
+          console.warn('⚠️  RPC function update_user_current_space not found. Please execute create-users-rpc-functions.sql');
         } else {
-          console.error('❌ RPC function update_user_current_household failed:', rpcError);
+          console.error('❌ RPC function update_user_current_space failed:', rpcError);
         }
         // 回退到直接更新（会失败，因为 RLS 策略问题）
         console.log('⚠️  Falling back to direct update (may fail due to RLS)...');
         const { error: directError } = await supabase
           .from('users')
-          .update({ current_household_id: householdId })
+          .update({ current_space_id: spaceId })
           .eq('id', authUser.id);
         updateError = directError;
         if (directError) {
@@ -340,7 +340,7 @@ export async function setCurrentHousehold(householdId: string): Promise<{ error:
       console.log('RPC function not available, using direct update:', rpcErr);
       const { error: directError } = await supabase
         .from('users')
-        .update({ current_household_id: householdId })
+        .update({ current_space_id: spaceId })
         .eq('id', authUser.id);
       updateError = directError;
     }
@@ -349,19 +349,19 @@ export async function setCurrentHousehold(householdId: string): Promise<{ error:
 
     return { error: null };
   } catch (error) {
-    console.error('Error setting current household:', error);
+    console.error('Error setting current space:', error);
     return {
-      error: error instanceof Error ? error : new Error('Failed to set current household'),
+      error: error instanceof Error ? error : new Error('Failed to set current space'),
     };
   }
 }
 
-// 创建新家庭并加入
-export async function createHousehold(name: string, address?: string): Promise<{ household: Household | null; error: Error | null }> {
+// 创建新空间并加入
+export async function createSpace(name: string, address?: string): Promise<{ space: Space | null; error: Error | null }> {
   try {
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) {
-      return { household: null, error: new Error('Not authenticated') };
+      return { space: null, error: new Error('Not authenticated') };
     }
 
     // 确保用户记录存在（如果不存在则创建）
@@ -377,14 +377,14 @@ export async function createHousehold(name: string, address?: string): Promise<{
           id: authUser.id,
           email: authUser.email || '',
           name: userName,
-          current_household_id: null,
+          current_space_id: null,
         });
       
       if (userInsertError) {
         // 如果创建用户记录失败（可能是 RLS 错误），返回友好错误
         return { 
-          household: null, 
-          error: new Error('Please confirm your email first, then try creating a household again.') 
+          space: null, 
+          error: new Error('Please confirm your email first, then try creating a space again.') 
         };
       }
     }
@@ -392,9 +392,9 @@ export async function createHousehold(name: string, address?: string): Promise<{
     // 验证认证状态
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      console.error('No active session when trying to create household');
+      console.error('No active session when trying to create space');
       return { 
-        household: null, 
+        space: null, 
         error: new Error('Not authenticated: Please sign in again') 
       };
     }
@@ -429,7 +429,7 @@ export async function createHousehold(name: string, address?: string): Promise<{
     }
     
     // 添加详细的调试信息
-    console.log('Attempting to create household:', {
+    console.log('Attempting to create space:', {
       name: insertData.name,
       address: insertData.address,
       userId: authUser.id,
@@ -454,7 +454,7 @@ export async function createHousehold(name: string, address?: string): Promise<{
     if (!verifySession) {
       console.error('Session verification failed:', verifyError);
       return { 
-        household: null, 
+        space: null, 
         error: new Error('Session expired or invalid. Please sign in again.') 
       };
     }
@@ -465,7 +465,7 @@ export async function createHousehold(name: string, address?: string): Promise<{
     if (getUserError || !currentUser) {
       console.error('Failed to get current user (token may be expired):', getUserError);
       return { 
-        household: null, 
+        space: null, 
         error: new Error('Authentication token expired. Please sign in again.') 
       };
     }
@@ -481,7 +481,7 @@ export async function createHousehold(name: string, address?: string): Promise<{
     if (!finalSession) {
       console.error('Final session check failed - no session');
       return { 
-        household: null, 
+        space: null, 
         error: new Error('Session lost. Please sign in again.') 
       };
     }
@@ -495,28 +495,28 @@ export async function createHousehold(name: string, address?: string): Promise<{
     
     // 尝试使用 RPC 函数插入（如果存在，可以绕过 RLS）
     // 如果 RPC 函数不存在，会回退到直接插入
-    let householdData = null;
-    let householdError = null;
+    let spaceData = null;
+    let spaceError = null;
     
     // 先尝试使用 RPC 函数（如果存在）
-    const { data: rpcHouseholdId, error: rpcError } = await supabase.rpc('create_household_with_user', {
-      p_household_name: insertData.name,
-      p_household_address: insertData.address || null,
+    const { data: rpcSpaceId, error: rpcError } = await supabase.rpc('create_space_with_user', {
+      p_space_name: insertData.name,
+      p_space_address: insertData.address || null,
       p_user_id: currentUser.id,
     });
     
-    if (!rpcError && rpcHouseholdId) {
-      // RPC 成功，查询创建的 household
-      const { data: fetchedHousehold, error: fetchError } = await supabase
-        .from('households')
+    if (!rpcError && rpcSpaceId) {
+      // RPC 成功，查询创建的 space
+      const { data: fetchedSpace, error: fetchError } = await supabase
+        .from('spaces')
         .select('*')
-        .eq('id', rpcHouseholdId)
+        .eq('id', rpcSpaceId)
         .single();
       
-      if (!fetchError && fetchedHousehold) {
-        householdData = fetchedHousehold;
+      if (!fetchError && fetchedSpace) {
+        spaceData = fetchedSpace;
       } else {
-        householdError = fetchError;
+        spaceError = fetchError;
       }
     } else {
       // RPC 失败或不存在，尝试直接插入
@@ -532,48 +532,48 @@ export async function createHousehold(name: string, address?: string): Promise<{
         console.log('RPC returned no data, trying direct insert...');
       }
       
-      // 直接插入 households 表
+      // 直接插入 spaces 表
       const insertResult = await supabase
-        .from('households')
+        .from('spaces')
         .insert(insertData)
         .select()
         .single();
       
-      householdData = insertResult.data;
-      householdError = insertResult.error;
+      spaceData = insertResult.data;
+      spaceError = insertResult.error;
       
-      // 如果直接插入成功，需要手动创建 user_households 关联和更新 current_household_id
-      if (!householdError && householdData) {
+      // 如果直接插入成功，需要手动创建 user_spaces 关联和更新 current_space_id
+      if (!spaceError && spaceData) {
         
-        // 创建 user_households 关联
+        // 创建 user_spaces 关联
         const { error: associationError } = await supabase
-          .from('user_households')
+          .from('user_spaces')
           .insert({
             user_id: currentUser.id,
-            household_id: householdData.id,
+            space_id: spaceData.id,
             is_admin: true,
           });
         
         if (associationError) {
-          console.error('Failed to create user_households association:', associationError);
-          // 如果关联失败，尝试删除刚创建的家庭
+          console.error('Failed to create user_spaces association:', associationError);
+          // 如果关联失败，尝试删除刚创建的空间
           try {
-            await supabase.from('households').delete().eq('id', householdData.id);
-            console.warn('Cleaned up household after association error');
+            await supabase.from('spaces').delete().eq('id', spaceData.id);
+            console.warn('Cleaned up space after association error');
           } catch (deleteError) {
-            console.warn('Failed to cleanup household after association error:', deleteError);
+            console.warn('Failed to cleanup space after association error:', deleteError);
           }
-          householdError = associationError;
-          householdData = null;
+          spaceError = associationError;
+          spaceData = null;
         } else {
-          // 更新用户的 current_household_id
+          // 更新用户的 current_space_id
           const { error: updateError } = await supabase
             .from('users')
-            .update({ current_household_id: householdData.id })
+            .update({ current_space_id: spaceData.id })
             .eq('id', currentUser.id);
           
           if (updateError) {
-            console.warn('Failed to update current_household_id:', updateError);
+            console.warn('Failed to update current_space_id:', updateError);
             // 不阻止流程，用户可以稍后手动选择
           }
         }
@@ -581,22 +581,22 @@ export async function createHousehold(name: string, address?: string): Promise<{
     }
     
     // 如果直接插入失败，记录详细的请求信息
-    if (householdError) {
+    if (spaceError) {
     }
 
-    if (householdError) {
+    if (spaceError) {
       // 详细记录错误信息
-      console.error('Household creation error details:', {
-        code: householdError.code,
-        message: householdError.message,
-        details: householdError.details,
-        hint: householdError.hint,
+      console.error('Space creation error details:', {
+        code: spaceError.code,
+        message: spaceError.message,
+        details: spaceError.details,
+        hint: spaceError.hint,
         userId: authUser.id,
         userEmail: authUser.email,
       });
       
       // 如果是 RLS 错误，提供详细的错误信息和修复建议
-      if (householdError.code === '42501' || householdError.message?.includes('row-level security') || householdError.message?.includes('permission denied')) {
+      if (spaceError.code === '42501' || spaceError.message?.includes('row-level security') || spaceError.message?.includes('permission denied')) {
         
         // 解析 JWT token 检查 role
         let tokenRole = 'unknown';
@@ -614,63 +614,63 @@ export async function createHousehold(name: string, address?: string): Promise<{
         
         
         return { 
-          household: null, 
+          space: null, 
           error: new Error(
-            `无法创建家庭：数据库安全策略错误 (错误代码: ${householdError.code})。` +
+            `无法创建空间：数据库安全策略错误 (错误代码: ${spaceError.code})。` +
             `\n\n请执行以下脚本之一修复 RLS 策略：` +
             `\n1. fix-households-insert-direct.sql (使用 authenticated 角色)` +
             `\n2. fix-households-insert-public.sql (使用 public 角色)` +
-            `\n\n错误详情: ${householdError.message}` +
+            `\n\n错误详情: ${spaceError.message}` +
             `\n\n提示: 如果策略已设置为 public 仍然失败，请检查策略是否正确创建，并查看 Supabase SQL Editor 中的验证查询结果。`
           ) 
         };
       }
       
       // 其他错误也记录详细信息
-      console.error('Other error when creating household:', householdError);
-      throw householdError;
+      console.error('Other error when creating space:', spaceError);
+      throw spaceError;
     }
     
-    if (!householdData) {
-      return { household: null, error: new Error('Failed to create household') };
+    if (!spaceData) {
+      return { space: null, error: new Error('Failed to create space') };
     }
 
-    // 检查 user_households 关联是否已存在（RPC 函数可能已创建）
+    // 检查 user_spaces 关联是否已存在（RPC 函数可能已创建）
     // 注意：如果使用直接插入，关联已经在上面创建了
     const { data: existingAssociation } = await supabase
-      .from('user_households')
+      .from('user_spaces')
       .select('id')
       .eq('user_id', authUser.id)
-      .eq('household_id', householdData.id)
+      .eq('space_id', spaceData.id)
       .maybeSingle();
 
     // 如果关联不存在（RPC 函数可能没有创建），创建关联
     if (!existingAssociation) {
       const { error: associationError } = await supabase
-        .from('user_households')
+        .from('user_spaces')
         .insert({
           user_id: authUser.id,
-          household_id: householdData.id,
+          space_id: spaceData.id,
           is_admin: true,
         });
 
       if (associationError) {
-        // 如果关联失败，尝试删除刚创建的家庭
+        // 如果关联失败，尝试删除刚创建的空间
         // 注意：删除可能也会失败（RLS 错误），但不影响主要错误信息
         try {
-          await supabase.from('households').delete().eq('id', householdData.id);
-          console.warn('Cleaned up household after association error');
+          await supabase.from('spaces').delete().eq('id', spaceData.id);
+          console.warn('Cleaned up space after association error');
         } catch (deleteError) {
-          console.warn('Failed to cleanup household after association error:', deleteError);
+          console.warn('Failed to cleanup space after association error:', deleteError);
         }
         
         // 返回更友好的错误信息
         return {
-          household: null,
+          space: null,
           error: new Error(
-            `创建家庭成功，但关联用户失败。错误代码: ${associationError.code || 'unknown'}\n` +
+            `创建空间成功，但关联用户失败。错误代码: ${associationError.code || 'unknown'}\n` +
             `错误信息: ${associationError.message}\n\n` +
-            `请检查 user_households 表的 INSERT RLS 策略是否正确。`
+            `请检查 user_spaces 表的 INSERT RLS 策略是否正确。`
           ),
         };
       }
@@ -678,39 +678,39 @@ export async function createHousehold(name: string, address?: string): Promise<{
 
     // 设置为当前家庭（RPC 函数可能已设置，但确保设置正确）
     // 如果直接插入时已经更新了，这里会再次更新（不会出错）
-    const { error: setCurrentError } = await setCurrentHousehold(householdData.id);
+    const { error: setCurrentError } = await setCurrentSpace(spaceData.id);
     if (setCurrentError) {
-      console.warn('Failed to set as current household:', setCurrentError);
+      console.warn('Failed to set as current space:', setCurrentError);
       // 不阻止流程，用户可以稍后手动选择
     }
 
     // 创建默认分类和账户
     try {
-      await createDefaultCategoriesAndAccounts(householdData.id);
+      await createDefaultCategoriesAndAccounts(spaceData.id);
     } catch (error) {
       console.warn('Failed to create default categories and accounts:', error);
       // 不阻止流程，用户可以稍后手动创建
     }
 
-    const household: Household = {
-      id: householdData.id,
-      name: householdData.name,
-      address: householdData.address,
-      createdAt: householdData.created_at,
-      updatedAt: householdData.updated_at,
+    const space: Space = {
+      id: spaceData.id,
+      name: spaceData.name,
+      address: spaceData.address,
+      createdAt: spaceData.created_at,
+      updatedAt: spaceData.updated_at,
     };
 
-    return { household, error: null };
+    return { space, error: null };
   } catch (error) {
-    console.error('Error creating household:', error);
+    console.error('Error creating space:', error);
     return {
-      household: null,
-      error: error instanceof Error ? error : new Error('Failed to create household'),
+      space: null,
+      error: error instanceof Error ? error : new Error('Failed to create space'),
     };
   }
 }
 
-// 注册新用户（两步注册：第一步只创建用户，不创建家庭）
+// 注册新用户（两步注册：第一步只创建用户，不创建空间）
 export async function signUp(email: string, password: string, householdName?: string, userName?: string): Promise<{ user: User | null; error: Error | null }> {
   try {
     // 验证 Supabase 配置
@@ -771,7 +771,7 @@ export async function signUp(email: string, password: string, householdName?: st
       throw authError;
     }
     
-    // 两步注册：只创建用户，不创建家庭
+    // 两步注册：只创建用户，不创建空间
     // 用户将在首次登录时设置家庭或接受邀请
     if (householdName === undefined) {
       
@@ -791,7 +791,7 @@ export async function signUp(email: string, password: string, householdName?: st
       // 检查 users 表中是否已存在该用户（以防万一）
       const { data: existingUser } = await supabase
         .from('users')
-        .select('id, current_household_id, name')
+        .select('id, current_space_id, name')
         .eq('id', authData.user!.id)  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
         .maybeSingle();
       
@@ -807,20 +807,20 @@ export async function signUp(email: string, password: string, householdName?: st
           id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
           email: email,
           name: userName && userName.trim() ? userName.trim() : undefined,
-          householdId: existingUser.current_household_id || null, // 返回当前活动的家庭ID，如果没有则为 null
-          currentHouseholdId: existingUser.current_household_id || undefined,
+          spaceId: existingUser.current_space_id || null, // 返回当前活动的空间ID，如果没有则为 null
+          currentSpaceId: existingUser.current_space_id || undefined,
         };
         return { user, error: null };
       }
       
-      // 创建用户记录（不设置 current_household_id，等待首次登录时设置）
+      // 创建用户记录（不设置 current_space_id，等待首次登录时设置）
       const { error: userError } = await supabase
         .from('users')
         .insert({
           id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
           email: email,
           name: userNameFinal,
-          current_household_id: null,
+          current_space_id: null,
         });
 
       if (userError) {
@@ -857,13 +857,13 @@ export async function signUp(email: string, password: string, householdName?: st
         id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
         email: email,
         name: userNameFinal,
-        householdId: null,  // 类型为 string | null
-        currentHouseholdId: undefined,  // 类型为 string | undefined
+        spaceId: null,  // 类型为 string | null
+        currentSpaceId: undefined,  // 类型为 string | undefined
       };
       return { user, error: null };
     }
 
-    // 创建家庭和用户记录
+    // 创建空间和用户记录
     // 确保 authData.user 存在
     if (!authData.user) {
       return { 
@@ -872,39 +872,39 @@ export async function signUp(email: string, password: string, householdName?: st
       };
     }
     
-    const householdNameFinal = householdName || `${email.split('@')[0]}'s Household`;
+    const spaceNameFinal = householdName || `${email.split('@')[0]}'s Space`;
     // userNameFinal 已在函数开始处声明（第 338 行），直接使用
     
-    const { data: householdId, error: rpcError } = await supabase.rpc('create_user_with_household', {
+    const { data: spaceId, error: rpcError } = await supabase.rpc('create_user_with_space', {
       p_user_id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
       p_email: email,
-      p_household_name: householdNameFinal,
+      p_space_name: spaceNameFinal,
       p_user_name: userNameFinal,
     });
 
     if (rpcError) {
-      console.error('RPC error creating user/household:', rpcError);
+      console.error('RPC error creating user/space:', rpcError);
       
       // 如果 RPC 函数不存在，回退到直接插入（尝试）
       if (rpcError.message?.includes('function') || rpcError.code === '42883') {
         
         // 尝试直接插入（如果 RLS 策略允许）
-        const { data: householdData, error: householdError } = await supabase
-          .from('households')
-          .insert({ name: householdNameFinal })
+        const { data: spaceData, error: spaceError } = await supabase
+          .from('spaces')
+          .insert({ name: spaceNameFinal })
           .select()
           .single();
 
-        if (householdError) {
-          console.error('Household creation error:', householdError);
-          if (householdError.message?.includes('row-level security') || householdError.code === '42501') {
-            throw new Error('Database permission error: Unable to create household account. Please execute create-user-function.sql script in Supabase first');
+        if (spaceError) {
+          console.error('Space creation error:', spaceError);
+          if (spaceError.message?.includes('row-level security') || spaceError.code === '42501') {
+            throw new Error('Database permission error: Unable to create space account. Please execute create-user-function.sql script in Supabase first');
           }
-          throw new Error(`Failed to create household account: ${householdError.message}`);
+          throw new Error(`Failed to create space account: ${spaceError.message}`);
         }
         
-        if (!householdData) {
-          throw new Error('Registration failed: Household account not created');
+        if (!spaceData) {
+          throw new Error('Registration failed: Space account not created');
         }
 
         // 创建用户记录
@@ -915,7 +915,7 @@ export async function signUp(email: string, password: string, householdName?: st
             id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
             email: email,
             name: userNameFinal,
-            current_household_id: householdData.id,
+            current_space_id: spaceData.id,
           });
 
         if (userError) {
@@ -924,50 +924,50 @@ export async function signUp(email: string, password: string, householdName?: st
         }
         
         
-        // 创建 user_households 关联记录
+        // 创建 user_spaces 关联记录
         const { error: associationError } = await supabase
-          .from('user_households')
+          .from('user_spaces')
           .insert({
             user_id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
-            household_id: householdData.id,
+            space_id: spaceData.id,
           });
 
         if (associationError) {
-          console.warn('Failed to create user_household association:', associationError);
+          console.warn('Failed to create user_space association:', associationError);
         }
         
         // 创建默认分类和支付账户
-        await createDefaultCategoriesAndAccounts(householdData.id);
+        await createDefaultCategoriesAndAccounts(spaceData.id);
 
         const user: User = {
           id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
           email: email,
           name: userName && userName.trim() ? userName.trim() : undefined,
-          householdId: householdData.id,
-          currentHouseholdId: householdData.id,
+          spaceId: spaceData.id,
+          currentSpaceId: spaceData.id,
         };
 
         return { user, error: null };
       }
       
-      throw new Error(`Failed to create user and household: ${rpcError.message}`);
+      throw new Error(`Failed to create user and space: ${rpcError.message}`);
     }
 
-    if (!householdId) {
-      throw new Error('Registration failed: Household account not created');
+    if (!spaceId) {
+      throw new Error('Registration failed: Space account not created');
     }
 
 
     // 创建默认分类和支付账户
-    await createDefaultCategoriesAndAccounts(householdId);
+    await createDefaultCategoriesAndAccounts(spaceId);
 
-    // 创建 user_households 关联记录（如果不存在）
+    // 创建 user_spaces 关联记录（如果不存在）
     // 注意：RPC 函数应该已经创建了这个记录，但为了保险起见，我们在这里也创建
     const { error: associationError } = await supabase
-      .from('user_households')
+      .from('user_spaces')
       .insert({
         user_id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
-        household_id: householdId,
+        space_id: spaceId,
         is_admin: true, // Creator is admin
       })
       .select();
@@ -975,13 +975,13 @@ export async function signUp(email: string, password: string, householdName?: st
     if (associationError) {
       // 如果记录已存在（由 RPC 创建），这是正常的，不需要报错
       if (!associationError.message?.includes('duplicate') && !associationError.code?.includes('23505')) {
-        console.warn('Failed to create user_household association:', associationError);
+        console.warn('Failed to create user_space association:', associationError);
       }
     }
 
-    // 设置当前家庭和用户名
-    const updateData: { current_household_id: string; name?: string } = {
-      current_household_id: householdId,
+    // 设置当前空间和用户名
+    const updateData: { current_space_id: string; name?: string } = {
+      current_space_id: spaceId,
     };
     if (userName && userName.trim()) {
       updateData.name = userName.trim();
@@ -992,15 +992,15 @@ export async function signUp(email: string, password: string, householdName?: st
       .eq('id', authData.user!.id);  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
 
     if (setCurrentError) {
-      console.warn('Failed to set current_household_id/name:', setCurrentError);
+      console.warn('Failed to set current_space_id/name:', setCurrentError);
     }
 
     const user: User = {
       id: authData.user!.id,  // 使用 ! 断言，因为已经检查过 authData.user 不为 null
       email: email,
       name: userName && userName.trim() ? userName.trim() : undefined,
-      householdId: householdId,
-      currentHouseholdId: householdId,
+      spaceId: spaceId,
+      currentSpaceId: spaceId,
     };
 
     return { user, error: null };
@@ -1066,7 +1066,7 @@ export async function signIn(email: string, password: string): Promise<{ error: 
               id: authUser.id,
               email: authUser.email || '',
               name: userName,
-              current_household_id: null,
+              current_space_id: null,
             });
           
           if (insertError) {

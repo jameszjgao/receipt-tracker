@@ -6,10 +6,10 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import DocumentScanner from 'react-native-document-scanner-plugin';
 import Constants from 'expo-constants';
-import { isAuthenticated, getCurrentUser, getCurrentHousehold, setCurrentHousehold, getUserHouseholds, createHousehold } from '@/lib/auth';
+import { isAuthenticated, getCurrentUser, getCurrentSpace, setCurrentSpace, getUserSpaces, createSpace } from '@/lib/auth';
 import { initializeAuthCache, isCacheInitialized } from '@/lib/auth-cache';
-import { Household, UserHousehold } from '@/types';
-import { getPendingInvitationsForUser } from '@/lib/household-invitations';
+import { Space, UserSpace } from '@/types';
+import { getPendingInvitationsForUser } from '@/lib/space-invitations';
 import { uploadReceiptImageTemp } from '@/lib/supabase';
 import { saveReceipt } from '@/lib/database';
 import { processReceiptInBackground } from '@/lib/receipt-processor';
@@ -18,13 +18,13 @@ import { processImageForUpload } from '@/lib/image-processor';
 export default function HomeScreen() {
   const router = useRouter();
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
-  const [currentHousehold, setCurrentHouseholdState] = useState<Household | null>(null);
-  const [showHouseholdSwitch, setShowHouseholdSwitch] = useState(false);
-  const [households, setHouseholds] = useState<UserHousehold[]>([]);
+  const [currentSpace, setCurrentSpaceState] = useState<Space | null>(null);
+  const [showSpaceSwitch, setShowSpaceSwitch] = useState(false);
+  const [spaces, setSpaces] = useState<UserSpace[]>([]);
   const [switching, setSwitching] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newHouseholdName, setNewHouseholdName] = useState('');
-  const [newHouseholdAddress, setNewHouseholdAddress] = useState('');
+  const [newSpaceName, setNewSpaceName] = useState('');
+  const [newSpaceAddress, setNewSpaceAddress] = useState('');
   const [creating, setCreating] = useState(false);
   const [pendingInvitationsCount, setPendingInvitationsCount] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -38,44 +38,44 @@ export default function HomeScreen() {
   }, []);
 
   const continueAfterAuth = async () => {
-    // 检查用户是否有当前家庭（使用缓存，如果缓存未初始化则从数据库读取）
+    // 检查用户是否有当前空间（使用缓存，如果缓存未初始化则从数据库读取）
     const user = await getCurrentUser();
     if (!user) {
-      router.replace('/setup-household');
+      router.replace('/setup-space');
       return;
     }
 
-    // 检查用户是否有家庭（区分新用户和老用户）
-    const { getUserHouseholds } = await import('@/lib/auth');
-    const households = await getUserHouseholds();
+    // 检查用户是否有空间（区分新用户和老用户）
+    const { getUserSpaces } = await import('@/lib/auth');
+    const spaces = await getUserSpaces();
     
-    // 新用户：没有家庭，跳转到设置家庭页面（创建家庭）
-    if (households.length === 0) {
-      router.replace('/setup-household');
+    // 新用户：没有空间，跳转到设置空间页面（创建空间）
+    if (spaces.length === 0) {
+      router.replace('/setup-space');
       return;
     }
 
-    // 老用户：有家庭
-    // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用
-    if (user.currentHouseholdId || user.householdId) {
+    // 老用户：有空间
+    // 如果用户已经有当前空间（currentSpaceId 或 spaceId），直接进入应用
+    if (user.currentSpaceId || user.spaceId) {
       setIsLoggedIn(true);
       return;
     }
 
-    // 老用户：有家庭但没有当前家庭
-    if (households.length === 1) {
-      // 只有一个家庭，自动设置并进入
-      const { setCurrentHousehold } = await import('@/lib/auth');
-      await setCurrentHousehold(households[0].householdId);
+    // 老用户：有空间但没有当前空间
+    if (spaces.length === 1) {
+      // 只有一个空间，自动设置并进入
+      const { setCurrentSpace } = await import('@/lib/auth');
+      await setCurrentSpace(spaces[0].spaceId);
       // 更新缓存
       const updatedUser = await getCurrentUser(true);
-      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
-      await initializeAuthCache(updatedUser, updatedHousehold);
+      const updatedSpace = updatedUser ? await getCurrentSpace(true) : null;
+      await initializeAuthCache(updatedUser, updatedSpace);
       setIsLoggedIn(true);
       return;
     } else {
-      // 多个家庭但没有当前家庭，跳转到家庭选择页面
-      router.replace('/household-select');
+      // 多个空间但没有当前空间，跳转到空间选择页面
+      router.replace('/space-select');
       return;
     }
   };
@@ -94,8 +94,8 @@ export default function HomeScreen() {
       (async () => {
         try {
           const user = await getCurrentUser(true); // 强制刷新
-          const household = user ? await getCurrentHousehold(true) : null; // 强制刷新
-          await initializeAuthCache(user, household);
+          const space = user ? await getCurrentSpace(true) : null; // 强制刷新
+          await initializeAuthCache(user, space);
         } catch (error) {
           console.error('Error initializing auth cache:', error);
           // 错误不影响流程，目标页面会处理
@@ -112,41 +112,41 @@ export default function HomeScreen() {
 
   const continueAuthCheck = async () => {
     // 流程：登录成功 -> 判断是否已关联家庭 -> 有关联家庭 -> 进入上次登录的家庭的index
-    // 如果用户已有关联家庭，即使有 pending invitations，也允许进入应用（用户可以通过 Later 按钮忽略邀请）
+    // 如果用户已有关联空间，即使有 pending invitations，也允许进入应用（用户可以通过 Later 按钮忽略邀请）
     
-    // 首先检查用户是否有当前家庭（使用缓存，如果缓存未初始化则从数据库读取）
+    // 首先检查用户是否有当前空间（使用缓存，如果缓存未初始化则从数据库读取）
     let user;
     try {
-      user = await getCurrentUser(true); // 强制刷新，确保获取最新的currentHouseholdId
+      user = await getCurrentUser(true); // 强制刷新，确保获取最新的currentSpaceId
     } catch (userError) {
-      console.log('Index: Error getting user, redirecting to setup-household');
-      router.replace('/setup-household');
+      console.log('Index: Error getting user, redirecting to setup-space');
+      router.replace('/setup-space');
       return;
     }
     
     if (!user) {
-      console.log('Index: No user, redirecting to setup-household');
-      router.replace('/setup-household');
+      console.log('Index: No user, redirecting to setup-space');
+      router.replace('/setup-space');
       return;
     }
 
-    // 如果用户已经有当前家庭（currentHouseholdId 或 householdId），直接进入应用（进入上次登录的家庭）
-    // 即使有 pending invitations，也允许进入应用（用户可以通过 setup-household 页面的 Invitations 按钮处理）
-    if (user.currentHouseholdId || user.householdId) {
-      console.log('Index: User has current household, entering app (pending invitations can be handled later)');
+    // 如果用户已经有当前空间（currentSpaceId 或 spaceId），直接进入应用（进入上次登录的空间）
+    // 即使有 pending invitations，也允许进入应用（用户可以通过 setup-space 页面的 Invitations 按钮处理）
+    if (user.currentSpaceId || user.spaceId) {
+      console.log('Index: User has current space, entering app (pending invitations can be handled later)');
       setIsLoggedIn(true);
       return;
     }
 
-    // 用户没有当前家庭，检查用户是否有家庭（区分新用户和老用户）
-    const { getUserHouseholds } = await import('@/lib/auth');
-    const households = await getUserHouseholds();
+    // 用户没有当前空间，检查用户是否有空间（区分新用户和老用户）
+    const { getUserSpaces } = await import('@/lib/auth');
+    const spaces = await getUserSpaces();
     
-    // 新用户：没有家庭，检查是否有待处理的邀请
-    if (households.length === 0) {
+    // 新用户：没有空间，检查是否有待处理的邀请
+    if (spaces.length === 0) {
       // 检查是否有待处理的邀请（新用户需要处理邀请）
       try {
-        const { getPendingInvitationsForUser } = await import('@/lib/household-invitations');
+        const { getPendingInvitationsForUser } = await import('@/lib/space-invitations');
         const invitations = await getPendingInvitationsForUser();
         
         if (invitations.length > 0) {
@@ -160,28 +160,28 @@ export default function HomeScreen() {
         console.log('Index: Invitation check failed (non-blocking):', invError);
       }
       
-      // 新用户没有邀请，跳转到设置家庭页面（创建家庭）
-      console.log('Index: No households, redirecting to setup-household');
-      router.replace('/setup-household');
+      // 新用户没有邀请，跳转到设置空间页面（创建空间）
+      console.log('Index: No spaces, redirecting to setup-space');
+      router.replace('/setup-space');
       return;
     }
 
-    // 老用户：有家庭但没有当前家庭
-    if (households.length === 1) {
-      // 只有一个家庭，自动设置并进入（这就是上次登录的家庭）
-      console.log('Index: Setting single household:', households[0].householdId);
-      const { setCurrentHousehold } = await import('@/lib/auth');
-      await setCurrentHousehold(households[0].householdId);
-      // 更新缓存（使用已设置的家庭ID，避免再次查询）
+    // 老用户：有空间但没有当前空间
+    if (spaces.length === 1) {
+      // 只有一个空间，自动设置并进入（这就是上次登录的空间）
+      console.log('Index: Setting single space:', spaces[0].spaceId);
+      const { setCurrentSpace } = await import('@/lib/auth');
+      await setCurrentSpace(spaces[0].spaceId);
+      // 更新缓存（使用已设置的空间ID，避免再次查询）
       const updatedUser = await getCurrentUser(true); // 强制刷新
-      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null; // 强制刷新
-      await initializeAuthCache(updatedUser, updatedHousehold);
+      const updatedSpace = updatedUser ? await getCurrentSpace(true) : null; // 强制刷新
+      await initializeAuthCache(updatedUser, updatedSpace);
       setIsLoggedIn(true);
       return;
     } else {
-      // 多个家庭但没有当前家庭，跳转到家庭选择页面
-      console.log('Index: Multiple households, redirecting to household-select');
-      router.replace('/household-select');
+      // 多个空间但没有当前空间，跳转到空间选择页面
+      console.log('Index: Multiple spaces, redirecting to space-select');
+      router.replace('/space-select');
       return;
     }
   };
@@ -205,128 +205,128 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (isLoggedIn) {
-      loadHousehold();
-      // checkPendingInvitations 已在 loadHousehold 中调用
+      loadSpace();
+      // checkPendingInvitations 已在 loadSpace 中调用
     } else {
       setPendingInvitationsCount(0);
     }
   }, [isLoggedIn]);
 
-  // 使用 useFocusEffect 在页面获得焦点时检查 pending invitations 和重新加载家庭信息（用于从其他页面返回时刷新）
+  // 使用 useFocusEffect 在页面获得焦点时检查 pending invitations 和重新加载空间信息（用于从其他页面返回时刷新）
   useFocusEffect(
     useCallback(() => {
       if (isLoggedIn) {
-        // 重新加载家庭信息（用于从管理页切换家庭后返回时更新）
-        loadHousehold();
+        // 重新加载空间信息（用于从管理页切换空间后返回时更新）
+        loadSpace();
         checkPendingInvitations();
       }
     }, [isLoggedIn])
   );
 
-  // 添加路由守卫：每次页面获得焦点时检查用户是否有家庭（防止通过回退路径进入）
+  // 添加路由守卫：每次页面获得焦点时检查用户是否有空间（防止通过回退路径进入）
   useFocusEffect(
     useCallback(() => {
-      const checkUserHousehold = async () => {
+      const checkUserSpace = async () => {
         // 如果还没有完成登录检查，跳过
         if (isLoggedIn === null) {
           return;
         }
         
-        // 如果已登录，检查用户是否有家庭
+        // 如果已登录，检查用户是否有空间
         if (isLoggedIn) {
           try {
             const user = await getCurrentUser(true);
             if (!user) {
-              router.replace('/setup-household');
+              router.replace('/setup-space');
               return;
             }
             
-            // 检查用户是否有家庭
-            const households = await getUserHouseholds();
-            if (households.length === 0) {
-              // 没有家庭，重定向到 setup-household
-              router.replace('/setup-household');
+            // 检查用户是否有空间
+            const spaces = await getUserSpaces();
+            if (spaces.length === 0) {
+              // 没有空间，重定向到 setup-space
+              router.replace('/setup-space');
               return;
             }
             
-            // 如果有家庭但没有当前家庭，也重定向到 setup-household
-            if (!user.currentHouseholdId && !user.householdId) {
-              router.replace('/setup-household');
+            // 如果有空间但没有当前空间，也重定向到 setup-space
+            if (!user.currentSpaceId && !user.spaceId) {
+              router.replace('/setup-space');
               return;
             }
           } catch (error) {
-            console.error('Error checking user household in focus effect:', error);
-            router.replace('/setup-household');
+            console.error('Error checking user space in focus effect:', error);
+            router.replace('/setup-space');
           }
         }
       };
       
-      checkUserHousehold();
+      checkUserSpace();
     }, [isLoggedIn, router])
   );
 
-  const loadHousehold = async () => {
+  const loadSpace = async () => {
     try {
-      // 强制刷新，确保从管理页切换家庭后能获取最新数据
-      const household = await getCurrentHousehold(true);
-      setCurrentHouseholdState(household);
+      // 强制刷新，确保从管理页切换空间后能获取最新数据
+      const space = await getCurrentSpace(true);
+      setCurrentSpaceState(space);
       
-      // 加载家庭后检查 pending invitations（已有关联家庭的用户）
+      // 加载空间后检查 pending invitations（已有关联空间的用户）
       await checkPendingInvitations();
     } catch (error) {
-      console.error('Error loading household:', error);
+      console.error('Error loading space:', error);
     }
   };
 
 
-  const ensureUserHasHousehold = async (isNewUser: boolean = false) => {
-    // 确保用户有当前家庭，如果没有则设置到第一个家庭或创建新家庭
+  const ensureUserHasSpace = async (isNewUser: boolean = false) => {
+    // 确保用户有当前空间，如果没有则设置到第一个空间或创建新空间
     const user = await getCurrentUser();
     if (!user) return;
 
-    // 如果用户已经有当前家庭，不需要处理
-    if (user.currentHouseholdId || user.householdId) {
+    // 如果用户已经有当前空间，不需要处理
+    if (user.currentSpaceId || user.spaceId) {
       return;
     }
 
-    // 检查用户有哪些家庭
-    const households = await getUserHouseholds();
-    if (households.length > 0) {
-      // 有家庭但没有当前家庭，设置到第一个家庭
-      const { error } = await setCurrentHousehold(households[0].householdId);
+    // 检查用户有哪些空间
+    const spaces = await getUserSpaces();
+    if (spaces.length > 0) {
+      // 有空间但没有当前空间，设置到第一个空间
+      const { error } = await setCurrentSpace(spaces[0].spaceId);
       if (!error) {
         // 更新缓存
         const updatedUser = await getCurrentUser(true);
-        const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
-        await initializeAuthCache(updatedUser, updatedHousehold);
-        // 更新当前显示的家庭
-        setCurrentHouseholdState(updatedHousehold);
+        const updatedSpace = updatedUser ? await getCurrentSpace(true) : null;
+        await initializeAuthCache(updatedUser, updatedSpace);
+        // 更新当前显示的空间
+        setCurrentSpaceState(updatedSpace);
       }
     } else if (isNewUser) {
-      // 新用户没有家庭，跳转到创建家庭页面让用户手动创建
-      router.replace('/setup-household');
+      // 新用户没有空间，跳转到创建空间页面让用户手动创建
+      router.replace('/setup-space');
       return;
     } else {
-      // 老用户没有家庭的情况不应该发生，但如果有，也跳转到创建家庭页面
-      router.replace('/setup-household');
+      // 老用户没有空间的情况不应该发生，但如果有，也跳转到创建空间页面
+      router.replace('/setup-space');
     }
   };
 
 
-  const loadHouseholds = async () => {
+  const loadSpaces = async () => {
     try {
-      const data = await getUserHouseholds();
-      setHouseholds(data);
+      const data = await getUserSpaces();
+      setSpaces(data);
     } catch (error) {
-      console.error('Error loading households:', error);
-      Alert.alert('Error', 'Failed to load households');
+      console.error('Error loading spaces:', error);
+      Alert.alert('Error', 'Failed to load spaces');
     }
   };
 
-  const handleSwitchHousehold = async (householdId: string) => {
+  const handleSwitchSpace = async (spaceId: string) => {
     try {
       setSwitching(true);
-      const { error } = await setCurrentHousehold(householdId);
+      const { error } = await setCurrentSpace(spaceId);
       if (error) {
         Alert.alert('Error', error.message);
         setSwitching(false);
@@ -335,20 +335,20 @@ export default function HomeScreen() {
 
       // 更新缓存
       const updatedUser = await getCurrentUser(true);
-      const updatedHousehold = updatedUser ? await getCurrentHousehold(true) : null;
-      await initializeAuthCache(updatedUser, updatedHousehold);
+      const updatedSpace = updatedUser ? await getCurrentSpace(true) : null;
+      await initializeAuthCache(updatedUser, updatedSpace);
 
-      setShowHouseholdSwitch(false);
+      setShowSpaceSwitch(false);
       
       // 更新本地状态
-      if (updatedHousehold) {
-        setCurrentHouseholdState(updatedHousehold);
+      if (updatedSpace) {
+        setCurrentSpaceState(updatedSpace);
       }
       
-      // 切换家庭后检查邀请（需求：只在切换家庭时检查邀请）
+      // 切换空间后检查邀请（需求：只在切换空间时检查邀请）
       // 如果检查失败（如权限问题），静默继续，不阻塞切换流程
       try {
-        const { getPendingInvitationsForUser } = await import('@/lib/household-invitations');
+        const { getPendingInvitationsForUser } = await import('@/lib/space-invitations');
         const invitations = await getPendingInvitationsForUser();
         
         if (invitations.length > 0) {
@@ -361,52 +361,52 @@ export default function HomeScreen() {
         // 不记录错误日志，避免日志噪音
       }
       
-      // 重新加载家庭信息
-      await loadHousehold();
+      // 重新加载空间信息
+      await loadSpace();
     } catch (error) {
-      console.error('Error switching household:', error);
-      Alert.alert('Error', 'Failed to switch household');
+      console.error('Error switching space:', error);
+      Alert.alert('Error', 'Failed to switch space');
     } finally {
       setSwitching(false);
     }
   };
 
-  const openHouseholdSwitch = async () => {
-    await loadHouseholds();
-    setShowHouseholdSwitch(true);
+  const openSpaceSwitch = async () => {
+    await loadSpaces();
+    setShowSpaceSwitch(true);
   };
 
-  const handleCreateHousehold = async () => {
-    if (!newHouseholdName.trim()) {
-      Alert.alert('Error', 'Please enter household name');
+  const handleCreateSpace = async () => {
+    if (!newSpaceName.trim()) {
+      Alert.alert('Error', 'Please enter space name');
       return;
     }
 
     try {
       setCreating(true);
-      const { household, error } = await createHousehold(
-        newHouseholdName.trim(),
-        newHouseholdAddress.trim() || undefined
+      const { space, error } = await createSpace(
+        newSpaceName.trim(),
+        newSpaceAddress.trim() || undefined
       );
 
       if (error) {
-        Alert.alert('Error', error.message || 'Failed to create household');
+        Alert.alert('Error', error.message || 'Failed to create space');
         setCreating(false);
         return;
       }
 
-      if (household) {
+      if (space) {
         setShowCreateModal(false);
-        setNewHouseholdName('');
-        setNewHouseholdAddress('');
-        await loadHouseholds();
-        await loadHousehold();
-        setShowHouseholdSwitch(false);
+        setNewSpaceName('');
+        setNewSpaceAddress('');
+        await loadSpaces();
+        await loadSpace();
+        setShowSpaceSwitch(false);
         Alert.alert('Success', 'Space created successfully');
       }
     } catch (error) {
-      console.error('Error creating household:', error);
-      Alert.alert('Error', 'Failed to create household');
+      console.error('Error creating space:', error);
+      Alert.alert('Error', 'Failed to create space');
     } finally {
       setCreating(false);
     }
@@ -478,8 +478,8 @@ export default function HomeScreen() {
       // 3. Create receipt record
       const today = new Date().toISOString().split('T')[0];
       const receiptId = await saveReceipt({
-        householdId: '', // Will be auto-filled
-        storeName: 'Processing...',
+        spaceId: '', // Will be auto-filled
+        supplierName: 'Processing...',
         totalAmount: 0,
         date: today,
         status: 'processing',
@@ -556,11 +556,11 @@ export default function HomeScreen() {
         </View>
         <TouchableOpacity
           style={styles.householdNameContainer}
-          onPress={openHouseholdSwitch}
+          onPress={openSpaceSwitch}
           activeOpacity={0.7}
         >
           <Text style={styles.householdName} numberOfLines={1}>
-            {currentHousehold?.name || 'Loading...'}
+            {currentSpace?.name || 'Loading...'}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -610,13 +610,13 @@ export default function HomeScreen() {
       <Modal
         animationType="slide"
         transparent={true}
-        visible={showHouseholdSwitch}
-        onRequestClose={() => setShowHouseholdSwitch(false)}
+        visible={showSpaceSwitch}
+        onRequestClose={() => setShowSpaceSwitch(false)}
       >
         <TouchableOpacity
           style={styles.pickerOverlay}
           activeOpacity={1}
-          onPress={() => setShowHouseholdSwitch(false)}
+          onPress={() => setShowSpaceSwitch(false)}
         >
           <View style={styles.pickerBottomSheet} onStartShouldSetResponder={() => true}>
             <View style={styles.pickerHandle} />
@@ -624,35 +624,35 @@ export default function HomeScreen() {
               <Text style={styles.pickerTitle}>Switch Space</Text>
             </View>
             <ScrollView style={styles.pickerScrollView} showsVerticalScrollIndicator={false}>
-              {households.map((userHousehold) => (
+              {spaces.map((userSpace) => (
                 <TouchableOpacity
-                  key={userHousehold.householdId}
+                  key={userSpace.spaceId}
                   style={[
                     styles.pickerOption,
-                    currentHousehold?.id === userHousehold.householdId && styles.pickerOptionSelected
+                    currentSpace?.id === userSpace.spaceId && styles.pickerOptionSelected
                   ]}
-                  onPress={() => handleSwitchHousehold(userHousehold.householdId)}
-                  disabled={switching || currentHousehold?.id === userHousehold.householdId}
+                  onPress={() => handleSwitchSpace(userSpace.spaceId)}
+                  disabled={switching || currentSpace?.id === userSpace.spaceId}
                 >
                   <Ionicons 
                     name="home" 
                     size={20} 
-                    color={currentHousehold?.id === userHousehold.householdId ? "#6C5CE7" : "#636E72"} 
+                    color={currentSpace?.id === userSpace.spaceId ? "#6C5CE7" : "#636E72"} 
                   />
                   <View style={styles.householdOptionContent}>
                     <Text style={[
                       styles.pickerOptionText,
-                      currentHousehold?.id === userHousehold.householdId && styles.pickerOptionTextSelected
+                      currentSpace?.id === userSpace.spaceId && styles.pickerOptionTextSelected
                     ]}>
-                      {userHousehold.household?.name || 'Unnamed Space'}
+                      {userSpace.space?.name || 'Unnamed Space'}
                     </Text>
-                    {userHousehold.household?.address && (
+                    {userSpace.space?.address && (
                       <Text style={styles.householdOptionAddress} numberOfLines={1}>
-                        {userHousehold.household.address}
+                        {userSpace.space.address}
                       </Text>
                     )}
                   </View>
-                  {currentHousehold?.id === userHousehold.householdId && (
+                  {currentSpace?.id === userSpace.spaceId && (
                     <Ionicons name="checkmark" size={20} color="#6C5CE7" />
                   )}
                 </TouchableOpacity>
@@ -667,7 +667,7 @@ export default function HomeScreen() {
               <TouchableOpacity
                 style={styles.createHouseholdButton}
                 onPress={() => {
-                  setShowHouseholdSwitch(false);
+                  setShowSpaceSwitch(false);
                   setShowCreateModal(true);
                 }}
                 disabled={switching}
@@ -763,8 +763,8 @@ export default function HomeScreen() {
               <TouchableOpacity
                 onPress={() => {
                   setShowCreateModal(false);
-                  setNewHouseholdName('');
-                  setNewHouseholdAddress('');
+                  setNewSpaceName('');
+                  setNewSpaceAddress('');
                 }}
                 style={styles.modalCloseButton}
                 disabled={creating}
@@ -777,8 +777,8 @@ export default function HomeScreen() {
                 style={styles.createModalInput}
                 placeholder="Space Name"
                 placeholderTextColor="#95A5A6"
-                value={newHouseholdName}
-                onChangeText={setNewHouseholdName}
+                value={newSpaceName}
+                onChangeText={setNewSpaceName}
                 autoCapitalize="words"
                 editable={!creating}
               />
@@ -786,8 +786,8 @@ export default function HomeScreen() {
                 style={[styles.createModalInput, styles.createModalMultilineInput]}
                 placeholder="Address (Optional)"
                 placeholderTextColor="#95A5A6"
-                value={newHouseholdAddress}
-                onChangeText={setNewHouseholdAddress}
+                value={newSpaceAddress}
+                onChangeText={setNewSpaceAddress}
                 multiline
                 numberOfLines={3}
                 textAlignVertical="top"
@@ -798,8 +798,8 @@ export default function HomeScreen() {
                   style={[styles.createModalButton, styles.createModalCancelButton]}
                   onPress={() => {
                     setShowCreateModal(false);
-                    setNewHouseholdName('');
-                    setNewHouseholdAddress('');
+                    setNewSpaceName('');
+                    setNewSpaceAddress('');
                   }}
                   disabled={creating}
                 >
@@ -807,8 +807,8 @@ export default function HomeScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.createModalButton, styles.createModalConfirmButton]}
-                  onPress={handleCreateHousehold}
-                  disabled={creating || !newHouseholdName.trim()}
+                  onPress={handleCreateSpace}
+                  disabled={creating || !newSpaceName.trim()}
                 >
                   {creating ? (
                     <ActivityIndicator size="small" color="#fff" />

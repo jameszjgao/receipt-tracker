@@ -133,7 +133,7 @@ export default function VoiceInputScreen() {
           status: 'pending' as ReceiptStatus,
           paymentAccount: result.paymentAccountName ? {
             id: receipt.paymentAccountId || '',
-            householdId: receipt.householdId,
+            spaceId: receipt.spaceId,
             name: result.paymentAccountName,
             isAiRecognized: true,
           } : undefined,
@@ -216,7 +216,7 @@ export default function VoiceInputScreen() {
                 <View style={styles.receiptPreviewContent}>
                   <View style={styles.receiptPreviewRow}>
                     <Text style={styles.receiptPreviewLabel}>Marked as:</Text>
-                    <Text style={styles.receiptPreviewValue}>{message.receiptPreview.storeName}</Text>
+                    <Text style={styles.receiptPreviewValue}>{message.receiptPreview.supplierName}</Text>
                   </View>
                   <View style={styles.receiptPreviewRow}>
                     <Text style={styles.receiptPreviewLabel}>Date:</Text>

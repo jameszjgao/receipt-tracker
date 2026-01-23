@@ -1,17 +1,17 @@
-import { User, Household } from '@/types';
+import { User, Space } from '@/types';
 
-// 全局缓存用户和家庭信息
+// 全局缓存用户和空间信息
 let cachedUser: User | null = null;
-let cachedHousehold: Household | null = null;
+let cachedSpace: Space | null = null;
 let cacheInitialized = false;
 
 // 初始化缓存（登录时调用）
 export async function initializeAuthCache(
   user: User | null,
-  household: Household | null
+  space: Space | null
 ): Promise<void> {
   cachedUser = user;
-  cachedHousehold = household;
+  cachedSpace = space;
   cacheInitialized = true;
 }
 
@@ -20,9 +20,9 @@ export function getCachedUser(): User | null {
   return cachedUser;
 }
 
-// 获取缓存的家庭信息
-export function getCachedHousehold(): Household | null {
-  return cachedHousehold;
+// 获取缓存的空间信息
+export function getCachedSpace(): Space | null {
+  return cachedSpace;
 }
 
 // 更新缓存的用户信息
@@ -30,15 +30,15 @@ export function updateCachedUser(user: User | null): void {
   cachedUser = user;
 }
 
-// 更新缓存的家庭信息
-export function updateCachedHousehold(household: Household | null): void {
-  cachedHousehold = household;
+// 更新缓存的空间信息
+export function updateCachedSpace(space: Space | null): void {
+  cachedSpace = space;
 }
 
 // 清除缓存（登出时调用）
 export function clearAuthCache(): void {
   cachedUser = null;
-  cachedHousehold = null;
+  cachedSpace = null;
   cacheInitialized = false;
 }
 

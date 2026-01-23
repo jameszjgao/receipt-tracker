@@ -2,7 +2,7 @@ export default {
   expo: {
     name: "Vouchap",
     slug: "vouchap",
-    version: "1.4.0",
+    version: "2.0.0",
     owner: "aimlink",
     orientation: "portrait",
     icon: "./assets/icon.png",
@@ -20,7 +20,7 @@ export default {
     },
     android: {
       package: "com.vouchap.app",
-      versionCode: 5,
+      versionCode: 6,
       permissions: [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",

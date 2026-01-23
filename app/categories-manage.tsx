@@ -17,8 +17,8 @@ import {
   createCategory,
   updateCategory,
   deleteCategory,
-  Category,
 } from '@/lib/categories';
+import { Category } from '@/types';
 import { GradientText } from '@/lib/GradientText';
 
 // 预设颜色列表（减少数量，确保一行显示）

@@ -12,43 +12,43 @@ import {
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { getCurrentHousehold, getCurrentUser } from '@/lib/auth';
+import { getCurrentSpace, getCurrentUser } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-import { Household } from '@/types';
+import { Space } from '@/types';
 
-export default function HouseholdManageScreen() {
+export default function SpaceManageScreen() {
   const router = useRouter();
-  const [household, setHousehold] = useState<Household | null>(null);
+  const [space, setSpace] = useState<Space | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
-  const [householdName, setHouseholdName] = useState('');
-  const [householdAddress, setHouseholdAddress] = useState('');
+  const [spaceName, setSpaceName] = useState('');
+  const [spaceAddress, setSpaceAddress] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    loadHousehold();
+    loadSpace();
   }, []);
 
-  const loadHousehold = async () => {
+  const loadSpace = async () => {
     try {
       setLoading(true);
-      const data = await getCurrentHousehold();
+      const data = await getCurrentSpace();
       if (data) {
-        setHousehold(data);
-        setHouseholdName(data.name);
-        setHouseholdAddress(data.address || '');
+        setSpace(data);
+        setSpaceName(data.name);
+        setSpaceAddress(data.address || '');
       }
     } catch (error) {
-      console.error('Error loading household:', error);
-      Alert.alert('Error', 'Failed to load household information');
+      console.error('Error loading space:', error);
+      Alert.alert('Error', 'Failed to load space information');
     } finally {
       setLoading(false);
     }
   };
 
   const handleSave = async () => {
-    if (!household || !householdName.trim()) {
-      Alert.alert('Error', 'Household name cannot be empty');
+    if (!space || !spaceName.trim()) {
+      Alert.alert('Error', 'Space name cannot be empty');
       return;
     }
 
@@ -57,35 +57,35 @@ export default function HouseholdManageScreen() {
       const user = await getCurrentUser();
       if (!user) throw new Error('Not logged in');
 
-      // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-      const householdId = user.currentHouseholdId || user.householdId;
-      if (!householdId) throw new Error('No household selected');
+      // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+      const spaceId = user.currentSpaceId || user.spaceId;
+      if (!spaceId) throw new Error('No space selected');
 
       const { error } = await supabase
-        .from('households')
+        .from('spaces')
         .update({ 
-          name: householdName.trim(),
-          address: householdAddress.trim() || null,
+          name: spaceName.trim(),
+          address: spaceAddress.trim() || null,
         })
-        .eq('id', householdId);
+        .eq('id', spaceId);
 
       if (error) throw error;
 
-      Alert.alert('Success', 'Household information updated');
+      Alert.alert('Success', 'Space information updated');
       setEditing(false);
-      await loadHousehold();
+      await loadSpace();
     } catch (error) {
-      console.error('Error updating household:', error);
-      Alert.alert('Error', 'Failed to update household information');
+      console.error('Error updating space:', error);
+      Alert.alert('Error', 'Failed to update space information');
     } finally {
       setSaving(false);
     }
   };
 
   const handleCancel = () => {
-    if (household) {
-      setHouseholdName(household.name);
-      setHouseholdAddress(household.address || '');
+    if (space) {
+      setSpaceName(space.name);
+      setSpaceAddress(space.address || '');
     }
     setEditing(false);
   };
@@ -121,22 +121,22 @@ export default function HouseholdManageScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="home-outline" size={18} color="#6C5CE7" />
-            <Text style={styles.cardTitle}>Household Name</Text>
+            <Text style={styles.cardTitle}>Space Name</Text>
           </View>
           
           {editing ? (
             <View style={styles.editContainer}>
               <TextInput
                 style={styles.input}
-                value={householdName}
-                onChangeText={setHouseholdName}
-                placeholder="Enter household name"
+                value={spaceName}
+                onChangeText={setSpaceName}
+                placeholder="Enter space name"
                 autoFocus
               />
             </View>
           ) : (
             <View style={styles.viewContainer}>
-              <Text style={styles.householdName} numberOfLines={3}>{household?.name || 'N/A'}</Text>
+              <Text style={styles.spaceName} numberOfLines={3}>{space?.name || 'N/A'}</Text>
               <TouchableOpacity
                 style={styles.editButton}
                 onPress={() => setEditing(true)}
@@ -158,9 +158,9 @@ export default function HouseholdManageScreen() {
             <View style={styles.editContainer}>
               <TextInput
                 style={[styles.input, styles.multilineInput]}
-                value={householdAddress}
-                onChangeText={setHouseholdAddress}
-                placeholder="Enter household address (optional)"
+                value={spaceAddress}
+                onChangeText={setSpaceAddress}
+                placeholder="Enter space address (optional)"
                 multiline
                 numberOfLines={4}
                 textAlignVertical="top"
@@ -168,7 +168,7 @@ export default function HouseholdManageScreen() {
             </View>
           ) : (
             <View style={styles.viewContainer}>
-              <Text style={styles.householdName} numberOfLines={5}>{household?.address || 'Not set'}</Text>
+              <Text style={styles.spaceName} numberOfLines={5}>{space?.address || 'Not set'}</Text>
             </View>
           )}
         </View>
@@ -186,7 +186,7 @@ export default function HouseholdManageScreen() {
               <TouchableOpacity
                 style={[styles.button, styles.saveButton]}
                 onPress={handleSave}
-                disabled={saving || !householdName.trim()}
+                disabled={saving || !spaceName.trim()}
               >
                 {saving ? (
                   <ActivityIndicator size="small" color="#fff" />
@@ -198,19 +198,19 @@ export default function HouseholdManageScreen() {
           </View>
         )}
 
-        {household && (
+        {space && (
           <View style={styles.infoCard}>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Created:</Text>
               <Text style={styles.infoValue}>
-                {household.createdAt ? new Date(household.createdAt).toLocaleDateString() : 'N/A'}
+                {space.createdAt ? new Date(space.createdAt).toLocaleDateString() : 'N/A'}
               </Text>
             </View>
-            {household.updatedAt && (
+            {space.updatedAt && (
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Last Updated:</Text>
                 <Text style={styles.infoValue}>
-                  {new Date(household.updatedAt).toLocaleDateString()}
+                  {new Date(space.updatedAt).toLocaleDateString()}
                 </Text>
               </View>
             )}
@@ -290,14 +290,14 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
   },
-  householdName: {
+  spaceName: {
     flex: 1,
     fontSize: 15,
     color: '#2D3436',
     fontWeight: '400',
     lineHeight: 20,
   },
-  householdAddress: {
+  spaceAddress: {
     fontSize: 14,
     color: '#636E72',
     lineHeight: 20,

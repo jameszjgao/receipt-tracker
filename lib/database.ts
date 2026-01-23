@@ -3,7 +3,7 @@ import { Receipt, ReceiptItem, ReceiptStatus } from '@/types';
 import { getCurrentUser } from './auth';
 import { findCategoryByName } from './categories';
 import { findOrCreatePaymentAccount } from './payment-accounts';
-import { findOrCreateStore } from './stores';
+import { findOrCreateSupplier } from './suppliers';
 
 // 将日期数据转换为 YYYY-MM-DD 格式的字符串，完全忠实于票面日期，不做任何时区转换
 function normalizeDate(dateValue: any): string {
@@ -53,36 +53,37 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
       throw new Error('Not logged in: Please sign in before saving receipt');
     }
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) {
-      console.error('User has no household ID');
-      throw new Error('User not associated with household account, please sign in again');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) {
+      console.error('User has no space ID');
+      throw new Error('User not associated with space account, please sign in again');
     }
 
-    // 处理商家ID（排除无效的商家名称，如 "Processing..." 等）
-    let storeId = receipt.storeId;
-    if (!storeId && receipt.storeName) {
-      const trimmedStoreName = receipt.storeName.trim();
+    // 处理供应商ID（排除无效的供应商名称，如 "Processing..." 等）
+    let supplierId = receipt.supplierId;
+    const supplierName = receipt.supplierName || receipt.storeName; // 向后兼容
+    if (!supplierId && supplierName) {
+      const trimmedSupplierName = supplierName.trim();
       // 排除处理状态等无效名称
       const invalidNames = ['processing', 'processing...', 'pending', 'pending...', 'loading', 'loading...', '识别中', '处理中', '待处理'];
-      const isValidName = !invalidNames.includes(trimmedStoreName.toLowerCase());
+      const isValidName = !invalidNames.includes(trimmedSupplierName.toLowerCase());
 
       if (isValidName) {
         try {
-          // 如果没有 storeId 但有 storeName，尝试查找或创建商家
-          const store = await findOrCreateStore(trimmedStoreName, true);
-          storeId = store.id;
+          // 如果没有 supplierId 但有 storeName，尝试查找或创建供应商
+          const supplier = await findOrCreateSupplier(trimmedSupplierName, true);
+          supplierId = supplier.id;
         } catch (error) {
-          console.warn('Failed to create or find store:', error);
-          // 如果商家创建失败，继续处理其他信息，不阻塞整个流程
+          console.warn('Failed to create or find supplier:', error);
+          // 如果供应商创建失败，继续处理其他信息，不阻塞整个流程
         }
       } else {
-        console.warn(`Skipping invalid store name: "${trimmedStoreName}"`);
+        console.warn(`Skipping invalid supplier name: "${trimmedSupplierName}"`);
       }
-    } else if (!storeId && receipt.store) {
-      // 如果有 store 对象，使用其 ID
-      storeId = receipt.store.id;
+    } else if (!supplierId && receipt.supplier) {
+      // 如果有 supplier 对象，使用其 ID
+      supplierId = receipt.supplier.id;
     }
 
     // 处理支付账户ID
@@ -96,9 +97,9 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
     const { data: receiptData, error: receiptError } = await supabase
       .from('receipts')
       .insert({
-        household_id: householdId,
-        store_name: receipt.storeName,
-        store_id: storeId,
+        space_id: spaceId,
+        supplier_name: receipt.supplierName || receipt.storeName,
+        supplier_id: supplierId,
         total_amount: receipt.totalAmount,
         currency: receipt.currency,
         tax: receipt.tax,
@@ -117,12 +118,12 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
       console.error('Receipt insert error:', receiptError);
       console.error('User info:', {
         userId: user.id,
-        householdId: householdId,
+        spaceId: spaceId,
         email: user.email,
       });
       console.error('Receipt data being inserted:', {
-        household_id: householdId,
-        store_name: receipt.storeName,
+        space_id: spaceId,
+        supplier_name: receipt.supplierName || receipt.storeName,
         total_amount: receipt.totalAmount,
         date: receipt.date,
       });
@@ -132,11 +133,11 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
           'Database permission error: Unable to save receipt\n\n' +
           'Possible causes:\n' +
           '1. RLS policy not configured correctly - Please execute fix-receipts-rls-force.sql in Supabase\n' +
-          '2. get_user_household_id() function returns NULL - Check if user has associated household\n' +
-          '3. household_id mismatch - Please sign in again\n\n' +
+          '2. get_user_space_id() function returns NULL - Check if user has associated space\n' +
+          '3. space_id mismatch - Please sign in again\n\n' +
           'Current user info:\n' +
           `- User ID: ${user.id}\n` +
-          `- Household ID: ${householdId || 'NULL (not associated)'}\n` +
+          `- Space ID: ${spaceId || 'NULL (not associated)'}\n` +
           `- Email: ${user.email}\n\n` +
           'Please execute diagnose-rls-issue.sql script to view detailed status'
         );
@@ -183,7 +184,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
             const { data: defaultCategories } = await supabase
               .from('categories')
               .select('id')
-              .eq('household_id', householdId)
+              .eq('space_id', spaceId)
               .eq('is_default', true)
               .limit(1);
 
@@ -192,7 +193,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
               const { data: anyCategories } = await supabase
                 .from('categories')
                 .select('id')
-                .eq('household_id', householdId)
+                .eq('space_id', spaceId)
                 .limit(1);
 
               if (!anyCategories || anyCategories.length === 0) {
@@ -201,7 +202,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
                   'Please do one of the following:\n' +
                   '1. Execute add-default-categories-for-existing-users.sql in Supabase SQL Editor\n' +
                   '2. Or manually create at least one category in the app\n\n' +
-                  'Current user household ID: ' + (householdId || 'Unknown')
+                  'Current user space ID: ' + (spaceId || 'Unknown')
                 );
               }
               categoryId = anyCategories[0].id;
@@ -252,29 +253,30 @@ export async function updateReceipt(receiptId: string, receipt: Partial<Receipt>
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
-    // 处理商家ID（排除无效的商家名称，如 "Processing..." 等）
-    let storeId = receipt.storeId;
-    if (receipt.storeName && !storeId) {
-      const trimmedStoreName = receipt.storeName.trim();
+    // 处理供应商ID（排除无效的供应商名称，如 "Processing..." 等）
+    let supplierId = receipt.supplierId;
+    const supplierName = receipt.supplierName || receipt.storeName; // 向后兼容
+    if (supplierName && !supplierId) {
+      const trimmedSupplierName = supplierName.trim();
       // 排除处理状态等无效名称
       const invalidNames = ['processing', 'processing...', 'pending', 'pending...', 'loading', 'loading...', '识别中', '处理中', '待处理'];
-      const isValidName = !invalidNames.includes(trimmedStoreName.toLowerCase());
+      const isValidName = !invalidNames.includes(trimmedSupplierName.toLowerCase());
 
       if (isValidName) {
         try {
-          // 如果更新了 storeName 但没有 storeId，尝试查找或创建商家
-          const store = await findOrCreateStore(trimmedStoreName, true);
-          storeId = store.id;
+          // 如果更新了 storeName 但没有 supplierId，尝试查找或创建供应商
+          const supplier = await findOrCreateSupplier(trimmedSupplierName, true);
+          supplierId = supplier.id;
         } catch (error) {
-          console.warn('Failed to create or find store:', error);
-          // 如果商家创建失败，继续处理其他信息，不阻塞整个流程
+          console.warn('Failed to create or find supplier:', error);
+          // 如果供应商创建失败，继续处理其他信息，不阻塞整个流程
         }
       } else {
-        console.warn(`Skipping invalid store name: "${trimmedStoreName}"`);
+        console.warn(`Skipping invalid supplier name: "${trimmedSupplierName}"`);
       }
-    } else if (receipt.store && !storeId) {
-      // 如果有 store 对象，使用其 ID
-      storeId = receipt.store.id;
+    } else if (receipt.supplier && !supplierId) {
+      // 如果有 supplier 对象，使用其 ID
+      supplierId = receipt.supplier.id;
     }
 
     // 处理支付账户ID
@@ -286,8 +288,9 @@ export async function updateReceipt(receiptId: string, receipt: Partial<Receipt>
 
     // 更新小票主记录
     const updateData: any = {};
-    if (receipt.storeName !== undefined) updateData.store_name = receipt.storeName;
-    if (storeId !== undefined) updateData.store_id = storeId;
+    if (receipt.supplierName !== undefined) updateData.supplier_name = receipt.supplierName;
+    else if (receipt.storeName !== undefined) updateData.supplier_name = receipt.storeName; // 向后兼容
+    if (supplierId !== undefined) updateData.supplier_id = supplierId;
     if (receipt.totalAmount !== undefined) updateData.total_amount = receipt.totalAmount;
     if (receipt.currency !== undefined) updateData.currency = receipt.currency;
     if (receipt.tax !== undefined) updateData.tax = receipt.tax;
@@ -297,15 +300,15 @@ export async function updateReceipt(receiptId: string, receipt: Partial<Receipt>
     if (receipt.confidence !== undefined) updateData.confidence = receipt.confidence;
     if (receipt.imageUrl !== undefined) updateData.image_url = receipt.imageUrl;
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     const { error: receiptError } = await supabase
       .from('receipts')
       .update(updateData)
       .eq('id', receiptId)
-      .eq('household_id', householdId);
+                .eq('space_id', spaceId);
 
     if (receiptError) throw receiptError;
 
@@ -362,21 +365,21 @@ export async function getAllReceipts(): Promise<Receipt[]> {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     const { data, error } = await supabase
       .from('receipts')
       .select(`
         *,
-        stores (*),
+        suppliers (*),
         payment_accounts (*),
         created_by_user:users!created_by (
           id,
           email,
           name,
-          current_household_id
+          current_space_id
         ),
         receipt_items (
           *,
@@ -384,7 +387,7 @@ export async function getAllReceipts(): Promise<Receipt[]> {
           purposes (*)
         )
       `)
-      .eq('household_id', householdId)
+                .eq('space_id', spaceId)
       .order('created_at', { ascending: false })
       .order('created_at', { foreignTable: 'receipt_items', ascending: true });
 
@@ -392,19 +395,20 @@ export async function getAllReceipts(): Promise<Receipt[]> {
 
     return (data || []).map((row: any) => ({
       id: row.id,
-      householdId: row.household_id,
-      storeName: row.store_name,
-      storeId: row.store_id,
-      store: row.stores ? {
-        id: row.stores.id,
-        householdId: row.stores.household_id,
-        name: row.stores.name,
-        taxNumber: row.stores.tax_number,
-        phone: row.stores.phone,
-        address: row.stores.address,
-        isAiRecognized: row.stores.is_ai_recognized,
-        createdAt: row.stores.created_at,
-        updatedAt: row.stores.updated_at,
+      spaceId: row.space_id,
+      supplierName: row.supplier_name,
+      storeName: row.supplier_name, // 向后兼容
+      supplierId: row.supplier_id,
+      supplier: row.suppliers ? {
+        id: row.suppliers.id,
+        spaceId: row.suppliers.space_id,
+        name: row.suppliers.name,
+        taxNumber: row.suppliers.tax_number,
+        phone: row.suppliers.phone,
+        address: row.suppliers.address,
+        isAiRecognized: row.suppliers.is_ai_recognized,
+        createdAt: row.suppliers.created_at,
+        updatedAt: row.suppliers.updated_at,
       } : undefined,
       totalAmount: row.total_amount,
       currency: row.currency,
@@ -413,7 +417,7 @@ export async function getAllReceipts(): Promise<Receipt[]> {
       paymentAccountId: row.payment_account_id,
       paymentAccount: row.payment_accounts ? {
         id: row.payment_accounts.id,
-        householdId: row.payment_accounts.household_id,
+        spaceId: row.payment_accounts.space_id,
         name: row.payment_accounts.name,
         isAiRecognized: row.payment_accounts.is_ai_recognized,
         createdAt: row.payment_accounts.created_at,
@@ -430,7 +434,7 @@ export async function getAllReceipts(): Promise<Receipt[]> {
         id: row.created_by_user.id,
         email: row.created_by_user.email,
         name: row.created_by_user.name,
-        householdId: row.created_by_user.current_household_id,
+        spaceId: row.created_by_user.current_space_id,
       } : undefined,
       items: (row.receipt_items || []).map((item: any) => ({
         id: item.id,
@@ -438,7 +442,7 @@ export async function getAllReceipts(): Promise<Receipt[]> {
         categoryId: item.category_id,
         category: item.categories ? {
           id: item.categories.id,
-          householdId: item.categories.household_id,
+          spaceId: item.categories.space_id,
           name: item.categories.name,
           color: item.categories.color,
           isDefault: item.categories.is_default,
@@ -448,7 +452,7 @@ export async function getAllReceipts(): Promise<Receipt[]> {
         purposeId: item.purpose_id ?? null,
         purpose: item.purposes ? {
           id: item.purposes.id,
-          householdId: item.purposes.household_id,
+          spaceId: item.purposes.space_id,
           name: item.purposes.name,
           color: item.purposes.color,
           isDefault: item.purposes.is_default,
@@ -507,15 +511,15 @@ export async function getMostFrequentCurrency(): Promise<string | null> {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     // 查询当前家庭的所有小票，统计币种出现频次
     const { data, error } = await supabase
       .from('receipts')
       .select('currency')
-      .eq('household_id', householdId)
+                .eq('space_id', spaceId)
       .not('currency', 'is', null);
 
     if (error) {
@@ -559,21 +563,21 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     const { data, error } = await supabase
       .from('receipts')
       .select(`
         *,
-        stores (*),
+        suppliers (*),
         payment_accounts (*),
         created_by_user:users!created_by (
           id,
           email,
           name,
-          current_household_id
+          current_space_id
         ),
         receipt_items (
           *,
@@ -582,7 +586,7 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
         )
       `)
       .eq('id', receiptId)
-      .eq('household_id', householdId)
+                .eq('space_id', spaceId)
       .order('created_at', { foreignTable: 'receipt_items', ascending: true })
       .single();
 
@@ -594,19 +598,19 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
 
     return {
       id: data.id,
-      householdId: data.household_id,
-      storeName: data.store_name,
-      storeId: data.store_id,
-      store: data.stores ? {
-        id: data.stores.id,
-        householdId: data.stores.household_id,
-        name: data.stores.name,
-        taxNumber: data.stores.tax_number,
-        phone: data.stores.phone,
-        address: data.stores.address,
-        isAiRecognized: data.stores.is_ai_recognized,
-        createdAt: data.stores.created_at,
-        updatedAt: data.stores.updated_at,
+      spaceId: data.space_id,
+      supplierName: data.supplier_name,
+      supplierId: data.supplier_id,
+      supplier: data.suppliers ? {
+        id: data.suppliers.id,
+        spaceId: data.suppliers.space_id,
+        name: data.suppliers.name,
+        taxNumber: data.suppliers.tax_number,
+        phone: data.suppliers.phone,
+        address: data.suppliers.address,
+        isAiRecognized: data.suppliers.is_ai_recognized,
+        createdAt: data.suppliers.created_at,
+        updatedAt: data.suppliers.updated_at,
       } : undefined,
       totalAmount: data.total_amount,
       currency: data.currency,
@@ -615,7 +619,7 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
       paymentAccountId: data.payment_account_id,
       paymentAccount: data.payment_accounts ? {
         id: data.payment_accounts.id,
-        householdId: data.payment_accounts.household_id,
+        spaceId: data.payment_accounts.space_id,
         name: data.payment_accounts.name,
         isAiRecognized: data.payment_accounts.is_ai_recognized,
         createdAt: data.payment_accounts.created_at,
@@ -632,7 +636,7 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
         id: data.created_by_user.id,
         email: data.created_by_user.email,
         name: data.created_by_user.name,
-        householdId: data.created_by_user.current_household_id,
+        spaceId: data.created_by_user.current_space_id,
       } : undefined,
       items: (data.receipt_items || []).map((item: any) => ({
         id: item.id,
@@ -640,7 +644,7 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
         categoryId: item.category_id,
         category: item.categories ? {
           id: item.categories.id,
-          householdId: item.categories.household_id,
+          spaceId: item.categories.space_id,
           name: item.categories.name,
           color: item.categories.color,
           isDefault: item.categories.is_default,
@@ -650,7 +654,7 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
         purposeId: item.purpose_id ?? null,
         purpose: item.purposes ? {
           id: item.purposes.id,
-          householdId: item.purposes.household_id,
+          spaceId: item.purposes.space_id,
           name: item.purposes.name,
           color: item.purposes.color,
           isDefault: item.purposes.is_default,
@@ -726,16 +730,16 @@ export async function deleteReceipt(receiptId: string): Promise<void> {
       }
     }
 
-    // 优先使用 currentHouseholdId，如果没有则使用 householdId（向后兼容）
-    const householdId = user.currentHouseholdId || user.householdId;
-    if (!householdId) throw new Error('No household selected');
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
 
     // 删除会级联删除商品项
     const { error } = await supabase
       .from('receipts')
       .delete()
       .eq('id', receiptId)
-      .eq('household_id', householdId);
+                .eq('space_id', spaceId);
 
     if (error) throw error;
   } catch (error) {

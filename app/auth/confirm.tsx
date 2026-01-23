@@ -283,7 +283,7 @@ export default function EmailConfirmScreen() {
             id: user.id,
             email: user.email || '',
             name: userName,
-            current_household_id: null,
+            current_space_id: null,
           });
         
         if (insertError) {
