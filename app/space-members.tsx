@@ -106,6 +106,7 @@ export default function SpaceMembersScreen() {
       const userId = userEmailMap.get(inviteeEmail);
       const isMember = userId && existingUserIds.has(userId);
       
+      // 根据邀请状态分类，不要根据 isMember 推断状态
       if (inv.status === 'pending') {
         // 如果用户已经是成员，不显示pending邀请
         if (!isMember) {
@@ -118,14 +119,16 @@ export default function SpaceMembersScreen() {
         // 管理员取消的
         cancelled.push(inv);
       } else if (inv.status === 'removed') {
-        // 成员被移除的
+        // 成员被移除的（只有明确标记为 removed 才显示）
         removed.push(inv);
       } else if (inv.status === 'accepted') {
-        if (!isMember) {
-          // 已接受但不在成员列表中，说明被移除了（保持向后兼容）
-          removed.push(inv);
-        }
-        // 如果isMember为true，说明用户还在，不显示在邀请列表中
+        // 已接受的邀请：如果用户还在成员列表中，不显示；如果不在，可能是数据不一致，也不显示为 removed
+        // 注意：不要将 accepted 状态误判为 removed，只有明确标记为 removed 才显示
+        // 如果用户不在成员列表中但状态是 accepted，可能是：
+        // 1. 用户被移除了但邀请状态未更新（数据不一致）
+        // 2. RLS 策略问题导致查询不到用户
+        // 为了安全，不显示这些邀请，避免误判
+        // 如果确实需要显示，应该先更新邀请状态为 'removed'
       }
     });
     

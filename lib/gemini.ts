@@ -128,49 +128,55 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
    - DO NOT use generic terms like "Receipt", "Invoice", "Bill", "Processing", "Pending", or status words
    - If truly unidentifiable, use "Unknown Store" only as last resort
 
-2. Store information (storeInfo) - CRITICAL: Extract ALL visible merchant information. Scan the ENTIRE receipt including header, footer, and all corners.
+2. Store information (storeInfo) - CRITICAL: Extract ALL visible merchant information with MAXIMUM DETAIL. Scan the ENTIRE receipt systematically: header, footer, sides, corners, and every section. This information is ESSENTIAL for complete merchant identification.
    
-   - Tax number (taxNumber): Extract ALL tax identification numbers if present. This is ESSENTIAL for merchant identification.
+   - Tax number (taxNumber): Extract ALL tax identification numbers if present. This is ESSENTIAL for merchant identification and MUST be extracted if visible anywhere on the receipt.
      * United States formats:
        - EIN (Employer Identification Number): XX-XXXXXXX (e.g., 12-3456789)
-       - Look for labels: "EIN", "Tax ID", "Federal Tax ID", "Employer ID"
+       - Look for labels: "EIN", "Tax ID", "Federal Tax ID", "Employer ID", "Tax ID#", "Tax Identification Number"
      * Canada formats:
        - GST/HST Number: 9 digits, may include RT (e.g., 123456789RT0001, GST/HST #123456789)
        - PST Number: Provincial Sales Tax number (varies by province)
        - QST Number: Quebec Sales Tax number
-       - Look for labels: "GST", "HST", "PST", "QST", "GST/HST #", "Tax Registration #"
+       - Look for labels: "GST", "HST", "PST", "QST", "GST/HST #", "Tax Registration #", "Business Number", "BN"
      * Other North American formats:
        - Business Number (BN): 9 digits (Canada)
        - State Tax ID (varies by US state)
-     * Common locations: Near store name at top, footer, or near tax calculation section
-     * **Extract ALL tax numbers if multiple are present (e.g., both GST and PST)**
+     * Common locations: Near store name at top, footer, near tax calculation section, registration section
+     * **Extract ALL tax numbers if multiple are present (e.g., both GST and PST). Combine them with commas if multiple.**
+     * **CRITICAL: Even if partially visible or unclear, extract what you can see. Do not omit tax numbers.**
    
-   - Phone (phone): Extract the phone number if available. This is IMPORTANT contact information.
+   - Phone (phone): Extract the phone number if available. This is IMPORTANT contact information and MUST be extracted if visible.
      * North American formats (most common):
        - (XXX) XXX-XXXX (e.g., (416) 555-1234)
        - XXX-XXX-XXXX (e.g., 416-555-1234)
        - XXX.XXX.XXXX (e.g., 416.555.1234)
        - 1-XXX-XXX-XXXX (with country code)
+       - XXX XXX XXXX (spaces only)
      * Toll-free numbers: 1-800-XXX-XXXX, 1-888-XXX-XXXX, 1-877-XXX-XXXX, 1-866-XXX-XXXX
-     * Common locations: Header, footer, customer service section
-     * Common labels: "Phone:", "Tel:", "Call:", "Customer Service:", "T:", "P:"
-     * **Extract the main business phone number (prefer customer service or main line over fax)**
+     * International formats: +1 XXX XXX XXXX, +1-XXX-XXX-XXXX
+     * Common locations: Header, footer, customer service section, contact section, near store name
+     * Common labels: "Phone:", "Tel:", "Call:", "Customer Service:", "T:", "P:", "Phone #", "Tel #", "Contact:", "Call us at"
+     * **Extract the main business phone number (prefer customer service or main line over fax). If multiple numbers, prefer the primary business number.**
+     * **CRITICAL: Extract phone numbers even if partially visible. Include area codes and country codes if present.**
    
-   - Address (address): Extract the COMPLETE business address. This is CRITICAL location information.
+   - Address (address): Extract the COMPLETE business address with ALL details. This is CRITICAL location information and MUST be extracted if visible.
      * North American address format:
-       - Street address: Building number + Street name (e.g., "123 Main Street", "456 Oak Ave")
+       - Street address: Building number + Street name (e.g., "123 Main Street", "456 Oak Ave", "789 King St W")
        - City, State/Province, ZIP/Postal Code
        - US format: "123 Main St, New York, NY 10001"
        - Canada format: "123 Main St, Toronto, ON M5H 2N2" (postal code format: A1A 1A1)
      * Include ALL visible details:
-       - Unit/suite number if present (e.g., "Suite 200", "Unit 5")
-       - Street direction if present (e.g., "North", "South", "E", "W")
-       - Full state/province name or abbreviation
-       - Complete ZIP/postal code
-     * Common locations: Header, footer, or dedicated address section
-     * Common labels: "Address:", "Location:", "Store Address:", "Business Address:"
+       - Unit/suite number if present (e.g., "Suite 200", "Unit 5", "#101", "Apt 3B")
+       - Street direction if present (e.g., "North", "South", "E", "W", "East", "West")
+       - Full state/province name or abbreviation (e.g., "California" or "CA", "Ontario" or "ON")
+       - Complete ZIP/postal code (e.g., "10001", "M5H 2N2")
+       - Building name if present (e.g., "Empire State Building", "Shopping Mall")
+     * Common locations: Header, footer, dedicated address section, near store name, registration section
+     * Common labels: "Address:", "Location:", "Store Address:", "Business Address:", "Registered Address:", "Mailing Address:", "Physical Address:"
      * **If multiple addresses are present, prefer the physical store/business address over mailing or registered address**
      * **For chain stores, prefer the specific location address over corporate headquarters**
+     * **CRITICAL: Extract the COMPLETE address including street number, street name, city, state/province, and postal/ZIP code. Do not omit any part if visible.**
 
 3. Date (date, format: YYYY-MM-DD): Extract the purchase/transaction date from the receipt
    - Common North American formats on receipts:
@@ -384,6 +390,11 @@ Please return strictly in JSON format without any extra text. JSON format as fol
 
       return {
         storeName: parsedResult.storeName || 'Unknown Store',
+        supplierInfo: parsedResult.storeInfo ? {
+          taxNumber: parsedResult.storeInfo.taxNumber && parsedResult.storeInfo.taxNumber !== 'null' ? parsedResult.storeInfo.taxNumber : undefined,
+          phone: parsedResult.storeInfo.phone && parsedResult.storeInfo.phone !== 'null' ? parsedResult.storeInfo.phone : undefined,
+          address: parsedResult.storeInfo.address && parsedResult.storeInfo.address !== 'null' ? parsedResult.storeInfo.address : undefined,
+        } : undefined,
         date: parsedResult.date || new Date().toISOString().split('T')[0],
         totalAmount: totalAmount,
         currency: parsedResult.currency || 'CNY',
@@ -503,6 +514,166 @@ Please return strictly in JSON format without any extra text. JSON format as fol
   }
 
   throw new Error('Receipt recognition failed: Unknown error');
+}
+
+/**
+ * 异步识别供应商详细信息（地址、电话、税号）
+ * 这是一个独立的识别任务，可以在基本小票信息返回后异步执行
+ */
+export async function recognizeSupplierInfo(
+  imageUrl: string,
+  storeName: string
+): Promise<{
+  taxNumber?: string;
+  phone?: string;
+  address?: string;
+}> {
+  const currentApiKey = Constants.expoConfig?.extra?.geminiApiKey || process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
+
+  if (!currentApiKey || currentApiKey === '' || currentApiKey === 'placeholder-key') {
+    console.warn('Gemini API Key not configured for supplier info recognition');
+    return {};
+  }
+
+  const currentGenAI = new GoogleGenerativeAI(currentApiKey);
+
+  const prompt = `You are a receipt analysis expert. Focus ONLY on extracting detailed merchant/supplier information from this receipt image.
+
+STORE NAME CONTEXT: "${storeName}"
+
+Your task is to extract COMPLETE merchant information with MAXIMUM DETAIL. Scan the ENTIRE receipt systematically: header, footer, sides, corners, and every section.
+
+EXTRACT THE FOLLOWING INFORMATION:
+
+1. Tax number (taxNumber) - CRITICAL: Extract ALL tax identification numbers if present anywhere on the receipt.
+   * United States formats:
+     - EIN (Employer Identification Number): XX-XXXXXXX (e.g., 12-3456789)
+     - Look for labels: "EIN", "Tax ID", "Federal Tax ID", "Employer ID", "Tax ID#", "Tax Identification Number"
+   * Canada formats:
+     - GST/HST Number: 9 digits, may include RT (e.g., 123456789RT0001, GST/HST #123456789)
+     - PST Number: Provincial Sales Tax number
+     - QST Number: Quebec Sales Tax number
+     - Look for labels: "GST", "HST", "PST", "QST", "GST/HST #", "Tax Registration #", "Business Number", "BN"
+   * Other formats:
+     - Business Number (BN): 9 digits (Canada)
+     - State Tax ID (varies by US state)
+   * Common locations: Near store name at top, footer, near tax calculation section, registration section
+   * **Extract ALL tax numbers if multiple are present. Combine them with commas if multiple.**
+   * **CRITICAL: Even if partially visible or unclear, extract what you can see. Do not omit tax numbers.**
+
+2. Phone (phone) - CRITICAL: Extract the phone number if available anywhere on the receipt.
+   * Formats:
+     - (XXX) XXX-XXXX (e.g., (416) 555-1234)
+     - XXX-XXX-XXXX (e.g., 416-555-1234)
+     - XXX.XXX.XXXX (e.g., 416.555.1234)
+     - 1-XXX-XXX-XXXX (with country code)
+     - Toll-free: 1-800-XXX-XXXX, 1-888-XXX-XXXX, etc.
+   * Common locations: Header, footer, customer service section, contact section
+   * Common labels: "Phone:", "Tel:", "Call:", "Customer Service:", "T:", "P:", "Phone #", "Tel #", "Contact:"
+   * **Extract the main business phone number. If multiple numbers, prefer the primary business number.**
+   * **CRITICAL: Extract phone numbers even if partially visible. Include area codes and country codes if present.**
+
+3. Address (address) - CRITICAL: Extract the COMPLETE business address with ALL details.
+   * Format: Street address, City, State/Province, ZIP/Postal Code
+   * Examples:
+     - US: "123 Main St, New York, NY 10001"
+     - Canada: "123 Main St, Toronto, ON M5H 2N2"
+   * Include ALL visible details:
+     - Unit/suite number if present (e.g., "Suite 200", "Unit 5", "#101")
+     - Street direction if present (e.g., "North", "South", "E", "W")
+     - Full state/province name or abbreviation
+     - Complete ZIP/postal code
+     - Building name if present
+   * Common locations: Header, footer, dedicated address section, near store name
+   * Common labels: "Address:", "Location:", "Store Address:", "Business Address:", "Registered Address:"
+   * **Prefer the physical store/business address over mailing or registered address.**
+   * **CRITICAL: Extract the COMPLETE address including street number, street name, city, state/province, and postal/ZIP code. Do not omit any part if visible.**
+
+Return ONLY valid JSON format without any extra text:
+{
+  "taxNumber": "12-3456789 or GST/HST #123456789 (Extract ALL tax numbers if visible. Use null ONLY if truly not found after scanning entire receipt)",
+  "phone": "(416) 555-1234 or 416-555-1234 (Extract main business phone if visible. Use null ONLY if truly not found)",
+  "address": "123 Main Street, Toronto, ON M5H 2N2 (Extract COMPLETE address including street, city, state/province, ZIP/postal code if visible. Use null ONLY if truly not found)"
+}`;
+
+  try {
+    // 下载图片
+    const downloadResult = await FileSystem.downloadAsync(
+      imageUrl,
+      FileSystem.documentDirectory + `temp-supplier-${Date.now()}.jpg`
+    );
+
+    if (!downloadResult.uri) {
+      console.warn('Failed to download image for supplier info recognition');
+      return {};
+    }
+
+    const base64 = await FileSystem.readAsStringAsync(downloadResult.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    try {
+      await FileSystem.deleteAsync(downloadResult.uri, { idempotent: true });
+    } catch (e) {
+      console.warn('Failed to delete temp file:', e);
+    }
+
+    let mimeType = 'image/jpeg';
+    if (imageUrl.includes('.png')) {
+      mimeType = 'image/png';
+    } else if (imageUrl.includes('.gif')) {
+      mimeType = 'image/gif';
+    } else if (imageUrl.includes('.webp')) {
+      mimeType = 'image/webp';
+    }
+
+    const imagePart = {
+      inlineData: {
+        data: base64,
+        mimeType: mimeType,
+      },
+    };
+
+    // 尝试使用可用的模型
+    const modelsToTry = availableModelCache ? [availableModelCache, ...POSSIBLE_MODELS] : POSSIBLE_MODELS;
+
+    for (const modelName of modelsToTry) {
+      try {
+        console.log(`[Supplier Info] Trying model: ${modelName}...`);
+        const model = currentGenAI.getGenerativeModel({ model: modelName });
+
+        const result = await model.generateContent([prompt, imagePart]);
+        const apiResponse = await result.response;
+        const text = apiResponse.text();
+        console.log(`[Supplier Info] ✅ Model ${modelName} worked! Response:`, text);
+
+        // 提取JSON部分
+        let jsonText = text.trim();
+        if (jsonText.startsWith('```json')) {
+          jsonText = jsonText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+        } else if (jsonText.startsWith('```')) {
+          jsonText = jsonText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+        }
+
+        const parsedResult = JSON.parse(jsonText);
+
+        return {
+          taxNumber: parsedResult.taxNumber && parsedResult.taxNumber !== 'null' ? parsedResult.taxNumber : undefined,
+          phone: parsedResult.phone && parsedResult.phone !== 'null' ? parsedResult.phone : undefined,
+          address: parsedResult.address && parsedResult.address !== 'null' ? parsedResult.address : undefined,
+        };
+      } catch (error) {
+        console.warn(`[Supplier Info] Model ${modelName} failed:`, error);
+        continue;
+      }
+    }
+
+    console.warn('[Supplier Info] All models failed for supplier info recognition');
+    return {};
+  } catch (error) {
+    console.error('[Supplier Info] Error recognizing supplier info:', error);
+    return {};
+  }
 }
 
 // 从文字识别小票内容

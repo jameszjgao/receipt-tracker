@@ -253,7 +253,12 @@ export async function getCurrentSpace(forceRefresh: boolean = false): Promise<Sp
 export async function getUserSpaces(): Promise<UserSpace[]> {
   try {
     const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (!authUser) return [];
+    if (!authUser) {
+      console.log('getUserSpaces: No authenticated user');
+      return [];
+    }
+
+    console.log('getUserSpaces: Querying for user_id:', authUser.id);
 
     const { data, error } = await supabase
       .from('user_spaces')
@@ -264,10 +269,24 @@ export async function getUserSpaces(): Promise<UserSpace[]> {
       .eq('user_id', authUser.id)
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
-    if (!data) return [];
+    if (error) {
+      console.error('getUserSpaces: Query error:', {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+      });
+      throw error;
+    }
 
-    return data.map((row: any) => ({
+    if (!data) {
+      console.log('getUserSpaces: No data returned (null)');
+      return [];
+    }
+
+    console.log('getUserSpaces: Found', data.length, 'spaces for user', authUser.id);
+
+    const result = data.map((row: any) => ({
       id: row.id,
       userId: row.user_id,
       spaceId: row.space_id,
@@ -280,8 +299,26 @@ export async function getUserSpaces(): Promise<UserSpace[]> {
       } : undefined,
       createdAt: row.created_at,
     }));
+
+    // 记录每个space的详细信息
+    result.forEach((userSpace, index) => {
+      console.log(`getUserSpaces: Space ${index + 1}:`, {
+        spaceId: userSpace.spaceId,
+        spaceName: userSpace.space?.name || 'Unknown',
+        hasSpaceData: !!userSpace.space,
+      });
+    });
+
+    return result;
   } catch (error) {
     console.error('Error getting user spaces:', error);
+    // 如果是权限错误，记录详细信息
+    if (error && typeof error === 'object' && 'code' in error) {
+      const err = error as any;
+      if (err.code === '42501' || err.message?.includes('permission denied')) {
+        console.error('getUserSpaces: RLS permission error - user may not have access to user_spaces table');
+      }
+    }
     return [];
   }
 }
@@ -381,11 +418,42 @@ export async function createSpace(name: string, address?: string): Promise<{ spa
         });
       
       if (userInsertError) {
-        // 如果创建用户记录失败（可能是 RLS 错误），返回友好错误
-        return { 
-          space: null, 
-          error: new Error('Please confirm your email first, then try creating a space again.') 
-        };
+        // 区分不同类型的错误
+        const errorCode = String(userInsertError.code || '');
+        const isRLSError = errorCode === '42501' || 
+                          userInsertError.message?.includes('row-level security') ||
+                          userInsertError.message?.includes('permission denied');
+        
+        if (isRLSError) {
+          // RLS 策略错误，返回更准确的错误信息
+          console.error('RLS error creating user record:', userInsertError);
+          return { 
+            space: null, 
+            error: new Error(
+              '无法创建用户记录：数据库权限错误。\n\n' +
+              '这可能是 RLS 策略配置问题。请检查：\n' +
+              '1. users 表的 INSERT RLS 策略是否正确\n' +
+              '2. 用户是否已通过邮箱确认（如果启用了邮箱确认）\n\n' +
+              `错误代码: ${errorCode}\n` +
+              `错误信息: ${userInsertError.message}`
+            ) 
+          };
+        } else {
+          // 其他错误（如重复键等），尝试再次查询用户记录
+          console.warn('User insert error (non-RLS):', userInsertError);
+          // 可能是并发创建，尝试再次查询
+          const retryUser = await getCurrentUser(true);
+          if (!retryUser) {
+            return { 
+              space: null, 
+              error: new Error(
+                `无法创建用户记录：${userInsertError.message}\n\n` +
+                `错误代码: ${errorCode}`
+              ) 
+            };
+          }
+          // 如果重试成功，继续执行
+        }
       }
     }
 

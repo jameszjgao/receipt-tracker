@@ -77,29 +77,12 @@ export default function ManualEntryScreen() {
 
       const receiptId = await saveReceipt(receipt);
 
-      Alert.alert(
-        'Success',
-        'Receipt saved successfully',
-        [
-          {
-            text: 'Add Another',
-            onPress: () => {
-              // 重置表单
-              setSupplierName('');
-              setDate(format(new Date(), 'yyyy-MM-dd'));
-              setTotalAmount('');
-              setPaymentAccountId(undefined);
-            },
-            style: 'cancel',
-          },
-          {
-            text: 'Done',
-            onPress: () => {
-              router.back();
-            },
-          },
-        ]
-      );
+      // 不再显示成功弹框，直接重置表单并返回
+      setSupplierName('');
+      setDate(format(new Date(), 'yyyy-MM-dd'));
+      setTotalAmount('');
+      setPaymentAccountId(undefined);
+      router.back();
     } catch (error) {
       console.error('Error saving receipt:', error);
       Alert.alert('Error', 'Failed to save receipt. Please try again.');

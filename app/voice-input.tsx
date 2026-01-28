@@ -16,7 +16,8 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { recognizeReceiptFromText } from '@/lib/gemini';
-import { saveReceipt, updateReceipt } from '@/lib/database';
+import { saveReceipt, updateReceipt, getReceiptById } from '@/lib/database';
+import { saveChatLog, getChatLogsPaginated } from '@/lib/chat-logs';
 import { ReceiptStatus, Receipt } from '@/types';
 import { convertGeminiResultToReceipt } from '@/lib/receipt-helpers';
 import { format } from 'date-fns';
@@ -41,6 +42,7 @@ interface Message {
   isUser: boolean;
   timestamp: Date;
   receiptPreview?: Receipt; // 识别结果预览
+  receiptDeleted?: boolean; // 对应小票是否已被删除（用于更新按钮状态）
 }
 
 export default function VoiceInputScreen() {
@@ -48,19 +50,125 @@ export default function VoiceInputScreen() {
   const [inputText, setInputText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [confirmedReceipts, setConfirmedReceipts] = useState<Set<string>>(new Set());
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      text: 'Hi! I can help you create receipts from text. Just describe your purchase, and I\'ll extract the details.\n\nExample: "I spent $25.50 at Starbucks on March 15th, 2024. Items: Coffee $5.50, Sandwich $20.00"',
-      isUser: false,
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [hasMoreHistory, setHasMoreHistory] = useState(true);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [oldestLoadedAt, setOldestLoadedAt] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   useEffect(() => {
+    // 首次加载：拉取最近的历史聊天记录（例如最近 20 条）
+    const loadInitialHistory = async () => {
+      try {
+        setIsLoadingHistory(true);
+        const logs = await getChatLogsPaginated(20);
+
+        if (!logs || logs.length === 0) {
+          // 没有历史时，显示默认欢迎文案
+          setMessages([
+            {
+              id: 'welcome',
+              text:
+                'Hi! I can help you create receipts from text. Just describe your purchase, and I\'ll extract the details.\n\nExample: "I spent $25.50 at Starbucks on March 15th, 2024. Items: Coffee $5.50, Sandwich $20.00"',
+              isUser: false,
+              timestamp: new Date(),
+            },
+          ]);
+          setHasMoreHistory(false);
+          return;
+        }
+
+        // Supabase 是按 created_at 降序返回，这里反转成时间正序显示
+        const sorted = [...logs].sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        );
+
+        const restoredMessages: Message[] = [];
+
+        for (const log of sorted) {
+          // 用户输入
+          if (log.prompt) {
+            restoredMessages.push({
+              id: `${log.id}-prompt`,
+              text: log.prompt,
+              isUser: true,
+              timestamp: new Date(log.createdAt),
+            });
+          }
+
+          // 系统回复 + 预览卡片
+          if (log.responseData?.receiptPreview) {
+            const preview = log.responseData.receiptPreview as Receipt;
+            restoredMessages.push({
+              id: `${log.id}-preview`,
+              text: 'I\'ve extracted the receipt details:',
+              isUser: false,
+              timestamp: new Date(log.createdAt),
+              receiptPreview: preview,
+            });
+          } else if (log.response) {
+            restoredMessages.push({
+              id: `${log.id}-response`,
+              text: log.response,
+              isUser: false,
+              timestamp: new Date(log.createdAt),
+            });
+          }
+        }
+
+        if (restoredMessages.length === 0) {
+          // 兜底：如果没有任何可还原的消息，也展示欢迎文案一次
+          setMessages([
+            {
+              id: 'welcome',
+              text:
+                'Hi! I can help you create receipts from text. Just describe your purchase, and I\'ll extract the details.\n\nExample: "I spent $25.50 at Starbucks on March 15th, 2024. Items: Coffee $5.50, Sandwich $20.00"',
+              isUser: false,
+              timestamp: new Date(),
+            },
+          ]);
+          setHasMoreHistory(false);
+        } else {
+          // 加载时就根据真实小票状态，预先打上已删除 / 已确认等标记
+          const enriched = await Promise.all(
+            restoredMessages.map(async (msg) => {
+              if (!msg.receiptPreview?.id) return msg;
+              try {
+                const receipt = await getReceiptById(msg.receiptPreview.id);
+                if (!receipt) {
+                  return { ...msg, receiptDeleted: true };
+                }
+                return {
+                  ...msg,
+                  receiptPreview: {
+                    ...msg.receiptPreview,
+                    status: receipt.status as ReceiptStatus,
+                  },
+                  receiptDeleted: false,
+                };
+              } catch {
+                // 查询失败时，保守认为已删除
+                return { ...msg, receiptDeleted: true };
+              }
+            }),
+          );
+
+          setMessages(enriched);
+          const oldest = sorted[sorted.length - 1];
+          setOldestLoadedAt(oldest.createdAt);
+          setHasMoreHistory(sorted.length >= 20);
+        }
+      } catch (error) {
+        console.error('Error loading initial chat history:', error);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    };
+
+    loadInitialHistory();
+
     // 自动聚焦输入框
     setTimeout(() => {
       inputRef.current?.focus();
@@ -86,6 +194,120 @@ export default function VoiceInputScreen() {
       keyboardWillHide.remove();
     };
   }, []);
+
+  // 向上滚动时加载更多历史记录
+  const handleScroll = async (event: any) => {
+    if (!hasMoreHistory || isLoadingHistory || !oldestLoadedAt) return;
+
+    const { contentOffset } = event.nativeEvent;
+    if (contentOffset.y <= 0) {
+      try {
+        setIsLoadingHistory(true);
+        const moreLogs = await getChatLogsPaginated(20, oldestLoadedAt);
+
+        if (!moreLogs || moreLogs.length === 0) {
+          setHasMoreHistory(false);
+          return;
+        }
+
+        const sorted = [...moreLogs].sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        );
+
+        const moreMessagesRaw: Message[] = [];
+        for (const log of sorted) {
+          if (log.prompt) {
+            moreMessagesRaw.push({
+              id: `${log.id}-prompt`,
+              text: log.prompt,
+              isUser: true,
+              timestamp: new Date(log.createdAt),
+            });
+          }
+          if (log.responseData?.receiptPreview) {
+            const preview = log.responseData.receiptPreview as Receipt;
+            moreMessagesRaw.push({
+              id: `${log.id}-preview`,
+              text: 'I\'ve extracted the receipt details:',
+              isUser: false,
+              timestamp: new Date(log.createdAt),
+              receiptPreview: preview,
+            });
+          } else if (log.response) {
+            moreMessagesRaw.push({
+              id: `${log.id}-response`,
+              text: log.response,
+              isUser: false,
+              timestamp: new Date(log.createdAt),
+            });
+          }
+        }
+
+        // 向上加载更多历史时，同样在加载阶段就识别删除/状态
+        const moreMessages = await Promise.all(
+          moreMessagesRaw.map(async (msg) => {
+            if (!msg.receiptPreview?.id) return msg;
+            try {
+              const receipt = await getReceiptById(msg.receiptPreview.id);
+              if (!receipt) {
+                return { ...msg, receiptDeleted: true };
+              }
+              return {
+                ...msg,
+                receiptPreview: {
+                  ...msg.receiptPreview,
+                  status: receipt.status as ReceiptStatus,
+                },
+                receiptDeleted: false,
+              };
+            } catch {
+              return { ...msg, receiptDeleted: true };
+            }
+          }),
+        );
+
+        setMessages((prev) => [...moreMessages, ...prev]);
+        const oldest = sorted[sorted.length - 1];
+        setOldestLoadedAt(oldest.createdAt);
+        setHasMoreHistory(sorted.length >= 20);
+      } catch (error) {
+        console.error('Error loading more chat history:', error);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    }
+  };
+
+  // 详情按钮：进入前先检查小票是否还存在，删除的话更新卡片状态
+  const handlePreviewDetails = async (message: Message) => {
+    const receiptId = message.receiptPreview?.id;
+    if (!receiptId) return;
+
+    try {
+      const receipt = await getReceiptById(receiptId);
+      if (!receipt) {
+        // 视为已删除
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === message.id ? { ...m, receiptDeleted: true } : m,
+          ),
+        );
+        Alert.alert('Receipt Deleted', 'This receipt has been deleted.');
+        return;
+      }
+
+      router.push(`/receipt-details/${receiptId}`);
+    } catch (error) {
+      console.error('Error loading receipt for preview:', error);
+      // 绝大多数情况下，异常意味着记录已被删除或无权限访问
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === message.id ? { ...m, receiptDeleted: true } : m,
+        ),
+      );
+      Alert.alert('Receipt Deleted', 'This receipt has been deleted.');
+    }
+  };
 
   const handleSend = async () => {
     const text = inputText.trim();
@@ -141,6 +363,18 @@ export default function VoiceInputScreen() {
       };
       setMessages(prev => [...prev, previewMessage]);
 
+      // 将本次对话写入 ai_chat_logs，便于下次进入继续看到历史
+      await saveChatLog({
+        receiptId,
+        type: 'text',
+        modelName: 'gemini',
+        prompt: text,
+        response: previewMessage.text,
+        requestData: { rawText: text },
+        responseData: { receiptPreview: previewMessage.receiptPreview },
+        success: true,
+      });
+
       // 滚动到底部
       setTimeout(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -184,6 +418,8 @@ export default function VoiceInputScreen() {
         contentContainerStyle={styles.messagesContent}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
         onContentSizeChange={() => {
           setTimeout(() => {
             scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -262,51 +498,82 @@ export default function VoiceInputScreen() {
                   )}
                 </View>
                 <View style={styles.receiptPreviewActions}>
-                  <TouchableOpacity
-                    style={styles.previewActionButton}
-                    onPress={() => {
-                      router.push(`/receipt-details/${message.receiptPreview!.id}`);
-                    }}
-                  >
-                    <Ionicons name="eye-outline" size={16} color="#6C5CE7" />
-                    <Text style={styles.previewActionText}>View Details</Text>
-                  </TouchableOpacity>
+                  {/* 左侧：仅在小票未删除时展示详情按钮 */}
+                  {!message.receiptDeleted && (
+                    <TouchableOpacity
+                      style={styles.previewActionButton}
+                      onPress={() => {
+                        handlePreviewDetails(message);
+                      }}
+                    >
+                      <Ionicons name="eye-outline" size={16} color="#6C5CE7" />
+                      <Text style={styles.previewActionText}>View Details</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {/* 右侧按钮：根据实际状态显示“Confirm / Confirmed / Deleted” */}
                   <TouchableOpacity
                     style={[
-                      styles.previewActionButton, 
-                      confirmedReceipts.has(message.receiptPreview!.id!) || message.receiptPreview!.status === 'confirmed'
+                      styles.previewActionButton,
+                      message.receiptDeleted
+                        ? styles.previewActionButtonDisabled
+                        : confirmedReceipts.has(message.receiptPreview!.id!) ||
+                          message.receiptPreview!.status === 'confirmed'
                         ? styles.previewActionButtonConfirmed
-                        : styles.previewActionButtonPrimary
+                        : styles.previewActionButtonPrimary,
                     ]}
                     onPress={async () => {
                       if (!message.receiptPreview?.id) return;
-                      
-                      // 如果已经确认，不做任何操作
-                      if (confirmedReceipts.has(message.receiptPreview.id) || message.receiptPreview.status === 'confirmed') {
+
+                      // 已删除的记录，不再允许确认，直接提示
+                      if (message.receiptDeleted) {
+                        Alert.alert('Receipt Deleted', 'This receipt has been deleted.');
                         return;
                       }
-                      
+
+                      // 如果已经确认，不做任何操作
+                      if (
+                        confirmedReceipts.has(message.receiptPreview.id) ||
+                        message.receiptPreview.status === 'confirmed'
+                      ) {
+                        return;
+                      }
+
                       try {
+                        // 再次确认小票是否存在，避免已被删除的情况
+                        const receipt = await getReceiptById(message.receiptPreview.id);
+                        if (!receipt) {
+                          setMessages((prev) =>
+                            prev.map((msg) =>
+                              msg.id === message.id ? { ...msg, receiptDeleted: true } : msg,
+                            ),
+                          );
+                          Alert.alert('Receipt Deleted', 'This receipt has been deleted.');
+                          return;
+                        }
+
                         // 更新小票状态为已确认
                         await updateReceipt(message.receiptPreview.id, { status: 'confirmed' });
-                        
+
                         // 更新本地状态
-                        setConfirmedReceipts(prev => new Set(prev).add(message.receiptPreview!.id!));
-                        
+                        setConfirmedReceipts((prev) => new Set(prev).add(message.receiptPreview!.id!));
+
                         // 更新消息中的 receipt 状态
-                        setMessages(prev => prev.map(msg => {
-                          if (msg.id === message.id && msg.receiptPreview) {
-                            return {
-                              ...msg,
-                              receiptPreview: {
-                                ...msg.receiptPreview,
-                                status: 'confirmed' as ReceiptStatus,
-                              },
-                            };
-                          }
-                          return msg;
-                        }));
-                        
+                        setMessages((prev) =>
+                          prev.map((msg) => {
+                            if (msg.id === message.id && msg.receiptPreview) {
+                              return {
+                                ...msg,
+                                receiptPreview: {
+                                  ...msg.receiptPreview,
+                                  status: 'confirmed' as ReceiptStatus,
+                                },
+                              };
+                            }
+                            return msg;
+                          }),
+                        );
+
                         // 清空输入框，准备下一条
                         setInputText('');
                         // 不自动聚焦，避免触发键盘
@@ -315,17 +582,31 @@ export default function VoiceInputScreen() {
                         Alert.alert('Error', 'Failed to confirm receipt. Please try again.');
                       }
                     }}
-                    disabled={confirmedReceipts.has(message.receiptPreview!.id!) || message.receiptPreview!.status === 'confirmed'}
+                    disabled={
+                      message.receiptDeleted ||
+                      confirmedReceipts.has(message.receiptPreview!.id!) ||
+                      message.receiptPreview!.status === 'confirmed'
+                    }
                   >
-                    <Ionicons 
-                      name={confirmedReceipts.has(message.receiptPreview!.id!) || message.receiptPreview!.status === 'confirmed' 
-                        ? "checkmark-circle" 
-                        : "checkmark-circle-outline"} 
-                      size={16} 
-                      color="#fff" 
-                    />
+                    {message.receiptDeleted ? (
+                      <Ionicons name="trash-outline" size={16} color="#fff" />
+                    ) : (
+                      <Ionicons
+                        name={
+                          confirmedReceipts.has(message.receiptPreview!.id!) ||
+                          message.receiptPreview!.status === 'confirmed'
+                            ? 'checkmark-circle'
+                            : 'checkmark-circle-outline'
+                        }
+                        size={16}
+                        color="#fff"
+                      />
+                    )}
                     <Text style={[styles.previewActionText, styles.previewActionTextPrimary]}>
-                      {confirmedReceipts.has(message.receiptPreview!.id!) || message.receiptPreview!.status === 'confirmed'
+                      {message.receiptDeleted
+                        ? 'Deleted'
+                        : confirmedReceipts.has(message.receiptPreview!.id!) ||
+                          message.receiptPreview!.status === 'confirmed'
                         ? 'Confirmed'
                         : 'Confirm'}
                     </Text>
@@ -591,6 +872,10 @@ const styles = StyleSheet.create({
   previewActionButtonConfirmed: {
     backgroundColor: '#00B894',
     borderColor: '#00B894',
+  },
+  previewActionButtonDisabled: {
+    backgroundColor: '#BDC3C7',
+    borderColor: '#BDC3C7',
   },
   previewActionText: {
     fontSize: 14,

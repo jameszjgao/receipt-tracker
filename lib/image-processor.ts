@@ -66,10 +66,10 @@ export async function detectEdges(imageUri: string): Promise<{ x: number; y: num
     // 3. 小票通常是矩形，长宽比通常在 1:2 到 2:1 之间
     
     // 计算合适的边距（根据图片尺寸动态调整）
-    // 对于较小的图片，使用较小的边距；对于较大的图片，使用较大的边距
-    const baseMargin = 0.15; // 基础边距 15%（更激进，去除更多背景）
-    const minMargin = 0.10;   // 最小边距 10%
-    const maxMargin = 0.20;  // 最大边距 20%
+    // 为了保留更多小票边缘，将边距整体调小一档
+    const baseMargin = 0.08; // 基础边距 8%（保留更多票据边缘）
+    const minMargin = 0.05;  // 最小边距 5%
+    const maxMargin = 0.12;  // 最大边距 12%
     
     // 根据图片尺寸调整边距
     const avgDimension = (imgWidth + imgHeight) / 2;
@@ -156,10 +156,10 @@ export async function detectReceiptCorners(imageUri: string): Promise<Quadrilate
     const imgWidth = imageInfo.width;
     const imgHeight = imageInfo.height;
     
-    // 计算边距（与 detectEdges 相同的逻辑）
-    const baseMargin = 0.15; // 基础边距 15%（更激进，去除更多背景）
-    const minMargin = 0.10;   // 最小边距 10%
-    const maxMargin = 0.20;  // 最大边距 20%
+    // 计算边距（与 detectEdges 相同的逻辑，整体调小以保留更多票据边缘）
+    const baseMargin = 0.08; // 基础边距 8%
+    const minMargin = 0.05;  // 最小边距 5%
+    const maxMargin = 0.12;  // 最大边距 12%
     const avgDimension = (imgWidth + imgHeight) / 2;
     let margin = baseMargin;
     if (avgDimension < 1000) {

@@ -16,7 +16,7 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import DocumentScanner from 'react-native-document-scanner-plugin';
+// DocumentScanner 将在需要时动态导入（因为它在 Expo Go 中不可用）
 import Constants from 'expo-constants';
 import { getAllReceipts, deleteReceipt, saveReceipt } from '@/lib/database';
 import { Receipt, ReceiptStatus } from '@/types';
@@ -76,6 +76,8 @@ export default function ReceiptsScreen() {
   const [selectedCreators, setSelectedCreators] = useState<Set<string>>(new Set());
   const [filterSubMenu, setFilterSubMenu] = useState<'main' | 'month' | 'recordDate' | 'account' | 'creator'>('main');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showFabActions, setShowFabActions] = useState(false);
+  const fabAnimation = useRef(new Animated.Value(0)).current;
   const router = useRouter();
   
   // Check if running in Expo Go
@@ -108,17 +110,44 @@ export default function ReceiptsScreen() {
     }
 
     try {
+      // 动态导入 DocumentScanner（只在非 Expo Go 环境中导入）
+      const module = await import('react-native-document-scanner-plugin');
+      const DocumentScanner = module?.default;
+
+      // 额外防御：模块导入但没有正确挂载时，直接提示使用开发构建
+      if (!DocumentScanner || typeof DocumentScanner.scanDocument !== 'function') {
+        throw new Error('DocumentScanner module not loaded correctly');
+      }
+
       const { scannedImages } = await DocumentScanner.scanDocument({
         maxNumDocuments: 1,
         croppedImageQuality: 90,
       });
 
       if (scannedImages && scannedImages.length > 0) {
-        processCapturedImage(scannedImages[0]);
+        // DocumentScanner 已经在原生侧做过裁剪，这里不再启用自动裁剪，避免二次截断
+        processCapturedImage(scannedImages[0], false);
       }
     } catch (error) {
       console.error('Document scan error:', error);
-      Alert.alert('Error', 'Failed to scan document. Please try again.');
+      // 如果是模块未找到或原生模块未正确注册的错误，统一提示需要开发构建
+      if (
+        error instanceof Error &&
+        (error.message?.includes('TurboModuleRegistry') ||
+          error.message?.includes('Requiring unknown module') ||
+          error.message?.includes('module not loaded correctly'))
+      ) {
+        Alert.alert(
+          'Development Build Required',
+          'Document scanner requires a native development build. Please use a development build or use the gallery picker option.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Pick from Gallery', onPress: pickImage }
+          ]
+        );
+      } else {
+        Alert.alert('Error', 'Failed to snap document. Please try again.');
+      }
     }
   };
 
@@ -131,7 +160,8 @@ export default function ReceiptsScreen() {
       });
 
       if (!result.canceled && result.assets[0]) {
-        processCapturedImage(result.assets[0].uri);
+        // 从相册选择的图片通常未裁剪，这里保留自动裁剪逻辑
+        processCapturedImage(result.assets[0].uri, true);
       }
     } catch (error) {
       console.error('Image picker error:', error);
@@ -139,14 +169,17 @@ export default function ReceiptsScreen() {
     }
   };
 
-  const processCapturedImage = async (imageUri: string) => {
+  // autoCrop 参数：
+  // - 扫描得到的图片（已在原生层裁剪）应传入 false，避免二次裁剪截断内容
+  // - 从相册选择的原始图片可以传入 true，启用自动裁剪去除背景
+  const processCapturedImage = async (imageUri: string, autoCrop: boolean = true) => {
     try {
       setIsProcessing(true);
       console.log('Processing captured image:', imageUri);
 
       const processedImageUri = await processImageForUpload(imageUri, {
-        autoCrop: true,
-        quality: 0.85
+        autoCrop,
+        quality: 0.85,
       });
       console.log('Image processed:', processedImageUri);
 
@@ -180,10 +213,7 @@ export default function ReceiptsScreen() {
         })
         .catch(err => console.error('Background processing failed:', err));
 
-      Alert.alert('Success', 'Receipt saved and processing...', [
-        { text: 'OK' },
-        { text: 'View Details', onPress: () => router.push(`/receipt-details/${receiptId}`) }
-      ]);
+      // 不再显示成功弹框，直接后台处理
     } catch (error) {
       setIsProcessing(false);
       console.error('Processing error:', error);
@@ -192,15 +222,36 @@ export default function ReceiptsScreen() {
   };
 
   const handleCameraPress = () => {
-    Alert.alert(
-      'Scan Receipt',
-      'Choose an option',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Scan Document', onPress: scanDocument },
-        { text: 'Pick from Gallery', onPress: pickImage }
-      ]
-    );
+    // 点击主「+」按钮：展开 / 收起 二级操作按钮，并带出浮动动画
+    if (!showFabActions) {
+      setShowFabActions(true);
+      fabAnimation.setValue(0);
+      Animated.timing(fabAnimation, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      Animated.timing(fabAnimation, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start(() => {
+        setShowFabActions(false);
+      });
+    }
+  };
+
+  const handleScanFromFab = () => {
+    // 直接执行扫描入口，并收起按钮组（不再播放收回动画）
+    setShowFabActions(false);
+    scanDocument();
+  };
+
+  const handleChatFromFab = () => {
+    // 直接执行聊天录入入口，并收起按钮组（不再播放收回动画）
+    setShowFabActions(false);
+    router.push('/voice-input');
   };
 
   // 设置 Supabase Realtime 订阅监听所有相关表的变化
@@ -984,13 +1035,62 @@ export default function ReceiptsScreen() {
         stickySectionHeadersEnabled={false}
       />
 
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={handleCameraPress}
-        disabled={isProcessing}
-      >
-        <Ionicons name="add" size={32} color="#fff" />
-      </TouchableOpacity>
+      {/* 底部悬浮菜单：保留主「+」按钮，点击后仅显示两个新按钮（与原按钮同大小），带浮出动效 */}
+      <View style={styles.fabContainer}>
+        {showFabActions && (
+          <View style={styles.fabActionsContainer}>
+            {/* 上方：聊天录入按钮，从原 + 位置向上浮出 */}
+            <Animated.View
+              style={{
+                transform: [
+                  {
+                    translateY: fabAnimation.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, -0], // 浮出距离减小，让两个按钮更靠拢
+                    }),
+                  },
+                ],
+                opacity: fabAnimation,
+              }}
+            >
+              <TouchableOpacity
+                style={styles.fabAction}
+                onPress={handleChatFromFab}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="chatbubble-outline" size={28} color="#6C5CE7" />
+              </TouchableOpacity>
+            </Animated.View>
+
+            {/* 下方：扫描按钮，保持在原 + 按钮位置，仅做轻微渐显 */}
+            <Animated.View
+              style={{
+                marginTop: 8,
+                opacity: fabAnimation,
+              }}
+            >
+              <TouchableOpacity
+                style={styles.fabAction}
+                onPress={handleScanFromFab}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="camera" size={28} color="#6C5CE7" />
+              </TouchableOpacity>
+            </Animated.View>
+          </View>
+        )}
+
+        {!showFabActions && (
+          <TouchableOpacity
+            style={styles.fabMain}
+            onPress={handleCameraPress}
+            disabled={isProcessing}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="add" size={32} color="#fff" />
+          </TouchableOpacity>
+        )}
+      </View>
 
       {/* Processing Modal */}
       {isProcessing && (
@@ -1675,10 +1775,17 @@ const styles = StyleSheet.create({
     color: '#636E72',
     marginLeft: 'auto',
   },
-  fab: {
+  fabContainer: {
     position: 'absolute',
     right: 20,
     bottom: 20,
+    alignItems: 'flex-end',
+  },
+  fabActionsContainer: {
+    // 动画容器，占位在原 + 按钮位置
+    alignItems: 'flex-end',
+  },
+  fabMain: {
     width: 64,
     height: 64,
     borderRadius: 32,
@@ -1691,6 +1798,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.22,
     shadowRadius: 6,
     elevation: 6,
+  },
+  fabAction: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 4,
   },
   emptyContainer: {
     flex: 1,

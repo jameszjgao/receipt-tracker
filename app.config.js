@@ -63,7 +63,7 @@ export default {
       [
         "react-native-document-scanner-plugin",
         {
-          "cameraPermission": "We need camera access to scan receipts."
+          "cameraPermission": "We need camera access to snap receipts."
         }
       ]
     ],

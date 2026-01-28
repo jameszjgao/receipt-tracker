@@ -4,7 +4,6 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import DocumentScanner from 'react-native-document-scanner-plugin';
 import Constants from 'expo-constants';
 import { isAuthenticated, getCurrentUser, getCurrentSpace, setCurrentSpace, getUserSpaces, createSpace } from '@/lib/auth';
 import { initializeAuthCache, isCacheInitialized } from '@/lib/auth-cache';
@@ -28,7 +27,6 @@ export default function HomeScreen() {
   const [creating, setCreating] = useState(false);
   const [pendingInvitationsCount, setPendingInvitationsCount] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [capturedReceiptId, setCapturedReceiptId] = useState<string | null>(null);
   
   // Check if running in Expo Go
   const isExpoGo = Constants.appOwnership === 'expo';
@@ -141,6 +139,14 @@ export default function HomeScreen() {
     // 用户没有当前空间，检查用户是否有空间（区分新用户和老用户）
     const { getUserSpaces } = await import('@/lib/auth');
     const spaces = await getUserSpaces();
+    
+    console.log('Index: User spaces count:', spaces.length);
+    if (spaces.length > 0) {
+      console.log('Index: User spaces:', spaces.map(s => ({
+        spaceId: s.spaceId,
+        spaceName: s.space?.name || 'Unknown',
+      })));
+    }
     
     // 新用户：没有空间，检查是否有待处理的邀请
     if (spaces.length === 0) {
@@ -427,17 +433,32 @@ export default function HomeScreen() {
     }
 
     try {
+      // 动态导入 DocumentScanner（只在非 Expo Go 环境中导入）
+      const DocumentScanner = (await import('react-native-document-scanner-plugin')).default;
       const { scannedImages } = await DocumentScanner.scanDocument({
         maxNumDocuments: 1,
         croppedImageQuality: 90,
       });
 
       if (scannedImages && scannedImages.length > 0) {
-        processCapturedImage(scannedImages[0]);
+        // DocumentScanner 已经做过一次精确裁剪，这里不再做二次自动裁剪，以免截断票面
+        processCapturedImage(scannedImages[0], false);
       }
     } catch (error) {
       console.error('Document scan error:', error);
-      Alert.alert('Error', 'Failed to scan document. Please try again.');
+      // 如果是模块未找到错误，提示使用开发构建
+      if (error instanceof Error && error.message?.includes('TurboModuleRegistry')) {
+        Alert.alert(
+          'Development Build Required',
+          'Document scanner requires a native development build. Please use a development build or use the gallery picker option.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Pick from Gallery', onPress: pickImage }
+          ]
+        );
+      } else {
+        Alert.alert('Error', 'Failed to snap document. Please try again.');
+      }
     }
   };
 
@@ -450,7 +471,8 @@ export default function HomeScreen() {
       });
 
       if (!result.canceled && result.assets[0]) {
-        processCapturedImage(result.assets[0].uri);
+        // 从相册选择的图片通常没有裁剪，这里保留自动裁剪逻辑
+        processCapturedImage(result.assets[0].uri, true);
       }
     } catch (error) {
       console.error('Image picker error:', error);
@@ -458,15 +480,18 @@ export default function HomeScreen() {
     }
   };
 
-  const processCapturedImage = async (imageUri: string) => {
+  // autoCrop 参数：
+  // - 对于扫描得到的图片（已经在原生层做过裁剪），应传入 false，避免二次裁剪截断内容
+  // - 对于从相册选择的原始图片，可以传入 true，启用自动裁剪去除背景
+  const processCapturedImage = async (imageUri: string, autoCrop: boolean = true) => {
     try {
       setIsProcessing(true);
       console.log('Processing captured image:', imageUri);
 
-      // 1. Process image (compress, crop, etc)
+      // 1. Process image (compress, optional auto-crop, etc)
       const processedImageUri = await processImageForUpload(imageUri, {
-        autoCrop: true,
-        quality: 0.85
+        autoCrop,
+        quality: 0.85,
       });
       console.log('Image processed:', processedImageUri);
 
@@ -489,7 +514,7 @@ export default function HomeScreen() {
       console.log('Receipt record created:', receiptId);
 
       setIsProcessing(false);
-      setCapturedReceiptId(receiptId);
+      // 简化交互：不再弹出提示，直接后台处理
 
       // 4. Background processing with Gemini
       processReceiptInBackground(imageUrl, receiptId, processedImageUri)
@@ -504,16 +529,8 @@ export default function HomeScreen() {
   };
 
   const handleCameraPress = () => {
-    // Show action sheet to choose between scan and pick from gallery
-    Alert.alert(
-      'Scan Receipt',
-      'Choose an option',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Scan Document', onPress: scanDocument },
-        { text: 'Pick from Gallery', onPress: pickImage }
-      ]
-    );
+    // 直接进入拍摄界面（扫描界面内部已支持选择已有图片）
+    scanDocument();
   };
 
   if (isLoggedIn === null) {
@@ -695,59 +712,6 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* Success Modal */}
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={capturedReceiptId !== null}
-        onRequestClose={() => setCapturedReceiptId(null)}
-      >
-        <View style={styles.successModalOverlay}>
-          <View style={styles.successModalContent}>
-            <View style={styles.successIconContainer}>
-              <Ionicons name="checkmark-circle" size={80} color="#00B894" />
-            </View>
-            <Text style={styles.successTitle}>Receipt Saved</Text>
-            <Text style={styles.successSubtitle}>Processing under way...</Text>
-
-            <View style={styles.successButtons}>
-              <TouchableOpacity
-                style={styles.successButton}
-                onPress={() => {
-                  setCapturedReceiptId(null);
-                  handleCameraPress();
-                }}
-              >
-                <Ionicons name="scan" size={24} color="#6C5CE7" />
-                <Text style={styles.successButtonText}>Scan Another</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.successButton}
-                onPress={() => {
-                  const receiptId = capturedReceiptId;
-                  setCapturedReceiptId(null);
-                  router.push(`/receipt-details/${receiptId}`);
-                }}
-              >
-                <Ionicons name="document-text" size={24} color="#6C5CE7" />
-                <Text style={styles.successButtonText}>View Details</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.successButton}
-                onPress={() => {
-                  setCapturedReceiptId(null);
-                  router.push('/receipts');
-                }}
-              >
-                <Ionicons name="list" size={24} color="#6C5CE7" />
-                <Text style={styles.successButtonText}>View List</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       {/* Create Space Modal */}
       <Modal

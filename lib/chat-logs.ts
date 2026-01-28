@@ -136,6 +136,66 @@ export async function getChatLogs(limit: number = 100): Promise<ChatLog[]> {
 }
 
 /**
+ * 分页获取聊天日志：用于“向上滚动加载更多”
+ * - before: 只取某个时间之前的记录（基于 created_at 游标）
+ */
+export async function getChatLogsPaginated(
+  limit: number,
+  before?: string,
+): Promise<ChatLog[]> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return [];
+    }
+
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) {
+      return [];
+    }
+
+    let query = supabase
+      .from('ai_chat_logs')
+      .select('*')
+      .eq('space_id', spaceId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (before) {
+      query = query.lt('created_at', before);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error fetching paginated chat logs:', error);
+      return [];
+    }
+
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      spaceId: row.space_id,
+      userId: row.user_id,
+      receiptId: row.receipt_id,
+      type: row.type,
+      modelName: row.model_name,
+      prompt: row.prompt,
+      response: row.response,
+      requestData: row.request_data,
+      responseData: row.response_data,
+      success: row.success,
+      errorMessage: row.error_message,
+      confidence: row.confidence,
+      processingTimeMs: row.processing_time_ms,
+      createdAt: row.created_at,
+    }));
+  } catch (error) {
+    console.error('Exception fetching paginated chat logs:', error);
+    return [];
+  }
+}
+
+/**
  * 获取特定小票的聊天日志
  */
 export async function getChatLogsByReceiptId(receiptId: string): Promise<ChatLog[]> {

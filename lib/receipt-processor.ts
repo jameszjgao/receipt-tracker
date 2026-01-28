@@ -1,9 +1,10 @@
 // 后台处理小票识别的模块
-import { recognizeReceipt } from './gemini';
+import { recognizeReceipt, recognizeSupplierInfo } from './gemini';
 import { convertGeminiResultToReceipt } from './receipt-helpers';
 import { updateReceipt, getReceiptById } from './database';
 import { uploadReceiptImage, supabase } from './supabase';
 import { checkDuplicateReceipt } from './receipt-duplicate-checker';
+import { findOrCreateSupplier, updateSupplier } from './suppliers';
 
 // 从公共URL中提取文件路径
 function extractFilePathFromUrl(url: string): string | null {
@@ -90,7 +91,65 @@ export async function processReceiptInBackground(
       confidence: recognizedData.confidence,
     });
     
-    // 6. 检测是否与已有小票重复
+    // 6. 异步识别供应商详细信息（不阻塞主流程）
+    // 如果基本识别中已经有一些供应商信息，先使用它们；然后异步补充更完整的信息
+    const supplierInfoFromBasic = recognizedData.supplierInfo;
+    const hasBasicSupplierInfo = supplierInfoFromBasic && (
+      supplierInfoFromBasic.taxNumber ||
+      supplierInfoFromBasic.phone ||
+      supplierInfoFromBasic.address
+    );
+
+    // 异步识别供应商详细信息（即使基本识别已有信息，也尝试获取更完整的信息）
+    recognizeSupplierInfo(finalImageUrl, receipt.supplierName || recognizedData.storeName)
+      .then(async (detailedSupplierInfo) => {
+        try {
+          console.log('[Supplier Info] 异步识别供应商详细信息完成:', detailedSupplierInfo);
+          
+          // 合并基本识别和详细识别的结果（详细识别优先）
+          const mergedSupplierInfo = {
+            taxNumber: detailedSupplierInfo.taxNumber || supplierInfoFromBasic?.taxNumber,
+            phone: detailedSupplierInfo.phone || supplierInfoFromBasic?.phone,
+            address: detailedSupplierInfo.address || supplierInfoFromBasic?.address,
+          };
+
+          // 如果有任何供应商信息，更新供应商记录
+          if (receipt.supplierId && (mergedSupplierInfo.taxNumber || mergedSupplierInfo.phone || mergedSupplierInfo.address)) {
+            console.log('[Supplier Info] 更新供应商详细信息:', mergedSupplierInfo);
+            await updateSupplier(receipt.supplierId, {
+              taxNumber: mergedSupplierInfo.taxNumber,
+              phone: mergedSupplierInfo.phone,
+              address: mergedSupplierInfo.address,
+            });
+            console.log('[Supplier Info] ✅ 供应商详细信息已更新');
+          } else if (receipt.supplierName && (mergedSupplierInfo.taxNumber || mergedSupplierInfo.phone || mergedSupplierInfo.address)) {
+            // 如果没有 supplierId，尝试查找或创建供应商
+            try {
+              const supplier = await findOrCreateSupplier(
+                receipt.supplierName,
+                true,
+                mergedSupplierInfo.taxNumber,
+                mergedSupplierInfo.phone,
+                mergedSupplierInfo.address
+              );
+              // 更新小票的 supplierId
+              await updateReceipt(receiptId, { supplierId: supplier.id });
+              console.log('[Supplier Info] ✅ 供应商已创建/更新，小票已关联');
+            } catch (error) {
+              console.warn('[Supplier Info] 更新供应商失败:', error);
+            }
+          }
+        } catch (error) {
+          console.error('[Supplier Info] 异步更新供应商信息失败:', error);
+          // 不抛出错误，因为这是异步补充信息，失败不影响主流程
+        }
+      })
+      .catch((error) => {
+        console.error('[Supplier Info] 异步识别供应商信息失败:', error);
+        // 不抛出错误，因为这是异步补充信息，失败不影响主流程
+      });
+
+    // 7. 检测是否与已有小票重复
     const updatedReceipt = await getReceiptById(receiptId);
     if (updatedReceipt) {
       const duplicateReceipt = await checkDuplicateReceipt(updatedReceipt);
