@@ -1,12 +1,13 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getCategories } from './categories';
 import { getPurposes } from './purposes';
+import { getPaymentAccounts } from './payment-accounts';
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as FileSystemNew from 'expo-file-system';
 import { GeminiReceiptResult } from '@/types';
 import { getAvailableImageModel } from './gemini-helper';
-import { getMostFrequentCurrency } from './database';
+import { getMostFrequentCurrency, getCurrenciesByUsage } from './database';
 
 // 引用 gemini-helper 中处理好的安全判断逻辑（如果 gemini-helper 导出了 apiKey）
 // 或者直接在此处复制安全获取逻辑：
@@ -118,17 +119,37 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
     purposeNames = ['Home', 'Gifts', 'Business'];
   }
 
+  // 获取用户已有的支付账户列表（按使用频率排序）
+  let paymentAccountNames: string[] = [];
+  try {
+    const paymentAccounts = await getPaymentAccounts();
+    paymentAccountNames = paymentAccounts.map(pa => pa.name);
+  } catch (error) {
+    console.warn('Failed to fetch payment accounts:', error);
+  }
+
+  // 获取用户历史小票中的币种列表（按使用频率排序）
+  let userCurrencies: string[] = [];
+  try {
+    userCurrencies = await getCurrenciesByUsage();
+  } catch (error) {
+    console.warn('Failed to fetch currency usage:', error);
+  }
+
   const categoryList = categoryNames.join(', ');
   const purposeList = purposeNames.join(', ');
+  const paymentAccountList = paymentAccountNames.length > 0 ? paymentAccountNames.join(', ') : '';
+  const defaultCurrency = userCurrencies.length > 0 ? userCurrencies[0] : 'USD';
+  const currencyList = userCurrencies.length > 0 ? userCurrencies.join(', ') : 'USD, CAD, MXN';
 
   const prompt = `You are a financial expert specializing in North American receipts. Analyze the receipt image and extract ALL available information with maximum accuracy.
 
-1. Store name (storeName): Extract the complete merchant/store name from the receipt header (usually the most prominent text at the top). 
+1. Supplier name (supplierName): Extract the complete merchant/store name from the receipt header (usually the most prominent text at the top). 
    - Look for: Company name, business name, brand name, or store chain name
    - DO NOT use generic terms like "Receipt", "Invoice", "Bill", "Processing", "Pending", or status words
-   - If truly unidentifiable, use "Unknown Store" only as last resort
+   - If truly unidentifiable, use "Unknown Supplier" only as last resort
 
-2. Store information (storeInfo) - CRITICAL: Extract ALL visible merchant information with MAXIMUM DETAIL. Scan the ENTIRE receipt systematically: header, footer, sides, corners, and every section. This information is ESSENTIAL for complete merchant identification.
+2. Supplier information (supplierInfo) - CRITICAL: Extract ALL visible merchant information with MAXIMUM DETAIL. Scan the ENTIRE receipt systematically: header, footer, sides, corners, and every section. This information is ESSENTIAL for complete merchant identification.
    
    - Tax number (taxNumber): Extract ALL tax identification numbers if present. This is ESSENTIAL for merchant identification and MUST be extracted if visible anywhere on the receipt.
      * United States formats:
@@ -218,15 +239,18 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
    - Exclude tip/gratuity if separately listed
 
 5. Currency (currency, ISO code such as: USD, CAD, MXN, etc.)
-   - US receipts: Usually USD
-   - Canadian receipts: Usually CAD
-   - Mexican receipts: Usually MXN
-   - If not explicitly stated, infer from location or receipt context
+   - IMPORTANT: User's most frequently used currencies (in order of frequency): [${currencyList}]
+   - If currency is not explicitly stated, use "${defaultCurrency}" as the default (user's most common currency)
+   - US receipts: Usually USD; Canadian receipts: Usually CAD; Mexican receipts: Usually MXN
+   - Infer from location, store name, or receipt context when not explicit
 6. Payment account (paymentAccountName, if available, MUST include key distinguishing information):
-   - Card number suffix: Last 4 digits (e.g., ****1234, *1234, Last 4: 1234, ending in 1234)
-   - Account type: Credit Card, Debit Card, Cash, Check, Gift Card, etc.
-   - Card brand if visible: Visa, Mastercard, Amex, Discover, etc.
-   - Any other identifying information (e.g., "Visa ending in 1234", "Cash", "Debit Card *5678")
+   - IMPORTANT: If the payment info matches any of these existing accounts, use the EXACT same name: [${paymentAccountList || 'No existing accounts'}]
+   - Match by card suffix (last 4 digits) or payment type when possible
+   - If no match found, create a new descriptive name with:
+     * Card number suffix: Last 4 digits (e.g., ****1234, *1234, Last 4: 1234, ending in 1234)
+     * Account type: Credit Card, Debit Card, Cash, Check, Gift Card, etc.
+     * Card brand if visible: Visa, Mastercard, Amex, Discover, etc.
+   - Example: If existing accounts include "Visa *1234" and receipt shows "VISA ending in 1234", use "Visa *1234"
 
 7. Tax amount (tax, numeric type, 0 if not available)
    - Extract total tax amount (sum of all taxes if multiple)
@@ -236,7 +260,7 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
 7. Detailed item list (items), each item contains:
    - Name (name)
    - Category (categoryName): Automatically select one from [${categoryList}] based on item content
-   - Purpose (purpose): Select one from [${purposeList}]. DEFAULT to "Home" unless there is clear evidence indicating otherwise (e.g., explicit business expense mention, gift purchase indication). Most receipts are personal/family use, so use "Home" as the default.
+   - Purpose (purpose): You MUST select EXACTLY one from this list: [${purposeList}]. Use the FIRST option "${purposeNames[0]}" as the default unless there is clear evidence indicating a different purpose. IMPORTANT: The value MUST match one of the listed options EXACTLY (case-sensitive). Do NOT use any value not in this list.
    - Unit price (price, numeric type, can be negative for refunds)
 8. Image quality assessment (imageQuality):
    - clarity: Image clarity score (0.0-1.0, where 1.0 is perfectly clear)
@@ -256,8 +280,8 @@ export async function recognizeReceipt(imageUrl: string): Promise<GeminiReceiptR
 
 Please return strictly in JSON format without any extra text. JSON format as follows:
 {
-  "storeName": "Store Name (must be actual merchant name, not generic terms like 'Receipt', 'Processing', or status words)",
-  "storeInfo": {
+  "supplierName": "Supplier Name (must be actual merchant name, not generic terms like 'Receipt', 'Processing', or status words)",
+  "supplierInfo": {
     "taxNumber": "12-3456789 or GST/HST #123456789 (Extract ALL tax numbers if visible. Use null ONLY if truly not found after scanning entire receipt)",
     "phone": "(416) 555-1234 or 416-555-1234 (Extract main business phone if visible. Use null ONLY if truly not found)",
     "address": "123 Main Street, Toronto, ON M5H 2N2 (Extract COMPLETE address including street, city, state/province, ZIP/postal code if visible. Use null ONLY if truly not found)"
@@ -389,11 +413,11 @@ Please return strictly in JSON format without any extra text. JSON format as fol
       const actualItemsSumMatches = Math.abs(expectedTotal - totalAmount) <= 0.01;
 
       return {
-        storeName: parsedResult.storeName || 'Unknown Store',
-        supplierInfo: parsedResult.storeInfo ? {
-          taxNumber: parsedResult.storeInfo.taxNumber && parsedResult.storeInfo.taxNumber !== 'null' ? parsedResult.storeInfo.taxNumber : undefined,
-          phone: parsedResult.storeInfo.phone && parsedResult.storeInfo.phone !== 'null' ? parsedResult.storeInfo.phone : undefined,
-          address: parsedResult.storeInfo.address && parsedResult.storeInfo.address !== 'null' ? parsedResult.storeInfo.address : undefined,
+        supplierName: parsedResult.supplierName || 'Unknown Supplier',
+        supplierInfo: parsedResult.supplierInfo ? {
+          taxNumber: parsedResult.supplierInfo.taxNumber && parsedResult.supplierInfo.taxNumber !== 'null' ? parsedResult.supplierInfo.taxNumber : undefined,
+          phone: parsedResult.supplierInfo.phone && parsedResult.supplierInfo.phone !== 'null' ? parsedResult.supplierInfo.phone : undefined,
+          address: parsedResult.supplierInfo.address && parsedResult.supplierInfo.address !== 'null' ? parsedResult.supplierInfo.address : undefined,
         } : undefined,
         date: parsedResult.date || new Date().toISOString().split('T')[0],
         totalAmount: totalAmount,
@@ -522,7 +546,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
  */
 export async function recognizeSupplierInfo(
   imageUrl: string,
-  storeName: string
+  supplierName: string
 ): Promise<{
   taxNumber?: string;
   phone?: string;
@@ -539,7 +563,7 @@ export async function recognizeSupplierInfo(
 
   const prompt = `You are a receipt analysis expert. Focus ONLY on extracting detailed merchant/supplier information from this receipt image.
 
-STORE NAME CONTEXT: "${storeName}"
+SUPPLIER NAME CONTEXT: "${supplierName}"
 
 Your task is to extract COMPLETE merchant information with MAXIMUM DETAIL. Scan the ENTIRE receipt systematically: header, footer, sides, corners, and every section.
 
@@ -722,22 +746,29 @@ export async function recognizeReceiptFromText(text: string): Promise<GeminiRece
     purposeNames = ['Home', 'Gifts', 'Business'];
   }
 
-  // 获取用户历史小票中最频繁的币种，作为默认币种
-  let defaultCurrency = 'USD'; // 文本识别的默认值
+  // 获取用户已有的支付账户列表（按使用频率排序）
+  let paymentAccountNames: string[] = [];
   try {
-    const mostFrequentCurrency = await getMostFrequentCurrency();
-    if (mostFrequentCurrency) {
-      defaultCurrency = mostFrequentCurrency;
-      console.log('Using most frequent currency as default:', defaultCurrency);
-    } else {
-      console.log('No currency history found, using default:', defaultCurrency);
-    }
+    const paymentAccounts = await getPaymentAccounts();
+    paymentAccountNames = paymentAccounts.map(pa => pa.name);
   } catch (error) {
-    console.warn('Failed to fetch most frequent currency, using default:', error);
+    console.warn('Failed to fetch payment accounts:', error);
+  }
+
+  // 获取用户历史小票中的币种列表（按使用频率排序）
+  let userCurrencies: string[] = [];
+  try {
+    userCurrencies = await getCurrenciesByUsage();
+    console.log('User currencies by usage:', userCurrencies);
+  } catch (error) {
+    console.warn('Failed to fetch currency usage:', error);
   }
 
   const categoryList = categoryNames.join(', ');
   const purposeList = purposeNames.join(', ');
+  const paymentAccountList = paymentAccountNames.length > 0 ? paymentAccountNames.join(', ') : '';
+  const defaultCurrency = userCurrencies.length > 0 ? userCurrencies[0] : 'USD';
+  const currencyList = userCurrencies.length > 0 ? userCurrencies.join(', ') : 'USD, CAD, CNY';
 
   const now = new Date();
   const today = now.toISOString().split('T')[0];
@@ -755,14 +786,14 @@ CURRENT DATE CONTEXT:
 
 REQUIRED FIELDS (extract completely, do not omit any mentioned information):
 
-1. Store name (storeName) - string, REQUIRED
+1. Supplier name (supplierName) - string, REQUIRED
    - Extract the complete store/business name from the text
-   - Look for patterns like: "at [Store Name]", "from [Store Name]", "paid [Store Name]", "[Store Name] receipt", or explicit store mentions
-   - If the store name is mentioned, extract it completely, including any brand names, locations, or suffixes
-   - If no store name is explicitly mentioned:
+   - Look for patterns like: "at [Supplier Name]", "from [Supplier Name]", "paid [Supplier Name]", "[Supplier Name] receipt", or explicit supplier mentions
+   - If the supplier name is mentioned, extract it completely, including any brand names, locations, or suffixes
+   - If no supplier name is explicitly mentioned:
      * First, try to infer from context (e.g., "Starbucks" from "coffee at Starbucks")
-     * If inference fails and there are items mentioned, use the FIRST item's name as the store name
-     * Only use "Unknown Store" as a last resort if no items are mentioned either
+     * If inference fails and there are items mentioned, use the FIRST item's name as the supplier name
+     * Only use "Unknown Supplier" as a last resort if no items are mentioned either
 
 2. Date (date) - string, format: YYYY-MM-DD, REQUIRED - CRITICAL: Purchase dates are typically RECENT dates
    - Extract the purchase date from the text with high priority
@@ -790,10 +821,11 @@ REQUIRED FIELDS (extract completely, do not omit any mentioned information):
    - Extract the final total, not subtotals
    - Must be a positive number
 
-4. Currency (currency) - string, default to "USD" if not mentioned
+4. Currency (currency) - string
+   - IMPORTANT: User's most frequently used currencies (in order of frequency): [${currencyList}]
+   - If currency is not explicitly stated, use "${defaultCurrency}" as the default (user's most common currency)
    - Extract currency from text: USD, CNY, EUR, GBP, JPY, etc.
    - Look for currency symbols: $ (USD), ¥ (CNY/JPY), € (EUR), £ (GBP)
-   - Default to "USD" only if no currency information is present
 
 5. Tax amount (tax) - number, default to 0 if not mentioned
    - Extract tax amount if explicitly mentioned
@@ -801,14 +833,14 @@ REQUIRED FIELDS (extract completely, do not omit any mentioned information):
    - Default to 0 if not mentioned
 
 6. Payment account (paymentAccountName) - string, HIGHLY IMPORTANT - extract ALL available payment details
-   - Extract COMPLETE payment information when mentioned:
+   - IMPORTANT: If the payment info matches any of these existing accounts, use the EXACT same name: [${paymentAccountList || 'No existing accounts'}]
+   - Match by card suffix (last 4 digits) or payment type when possible
+   - If no match found, create a new descriptive name with:
      * Card type: "Credit Card", "Debit Card", "Visa", "Mastercard", "Amex", "Discover"
      * Card number suffix: last 4 digits (e.g., "****1234", "*1234", "ending in 1234", "last 4: 1234")
      * Full account identifier: "Credit Card ****1234", "Visa *5678", "Debit Card ending 9012"
    - Other payment methods: "Cash", "PayPal", "Venmo", "Apple Pay", "Google Pay", "Bank Transfer", "Check"
-   - Include ALL identifying information to help distinguish different payment methods
-   - Format: Combine all payment details (e.g., "Credit Card ****1234", "Visa *5678", "Cash")
-   - If payment method is mentioned but incomplete, still include what is available
+   - Example: If existing accounts include "Visa *1234" and text mentions "paid with Visa ending in 1234", use "Visa *1234"
    - If no payment information is mentioned, omit this field (do not include)
 
 7. Items (items) - array, REQUIRED, must contain at least one item
@@ -816,7 +848,7 @@ REQUIRED FIELDS (extract completely, do not omit any mentioned information):
    - Each item must have:
      * name: string, complete item name or description
      * categoryName: string, MUST be one from this list: [${categoryList}]
-     * purpose: string, MUST be one from this list: [${purposeList}]. Choose "Home" for personal/family use, "Business" for work/business expenses, "Gifts" for gifts given to others
+     * purpose: string, MUST be EXACTLY one from this list: [${purposeList}]. Use the FIRST option "${purposeNames[0]}" as the default. The value MUST match one of the listed options EXACTLY.
      * price: number, unit price of the item (can be negative for refunds)
    - Look for item patterns:
      * Lists: "Items: Coffee $5.50, Sandwich $20.00"
@@ -840,7 +872,7 @@ REQUIRED FIELDS (extract completely, do not omit any mentioned information):
 CRITICAL EXTRACTION RULES:
 - Extract information COMPLETELY - do not omit any mentioned details
 - For dates: Parse all date formats carefully and extract the actual purchase date
-- For store names: Extract the complete business name, don't abbreviate unnecessarily
+- For supplier names: Extract the complete business name, don't abbreviate unnecessarily
 - For payment accounts: Include ALL identifying information (card type, last 4 digits, payment method)
 - For items: Extract ALL mentioned items, don't skip any
 - If the text is ambiguous, make reasonable inferences but note in confidence score
@@ -855,7 +887,7 @@ CRITICAL: Return ONLY valid JSON, no markdown, no code blocks, no explanations, 
 
 Example JSON format:
 {
-  "storeName": "Store Name",
+  "supplierName": "Supplier Name",
   "date": "${today}",
   "totalAmount": 123.45,
   "currency": "USD",
@@ -917,23 +949,23 @@ Example JSON format:
 
         const parsedResult: any = JSON.parse(jsonMatch[0]);
 
-        // 如果商家名称为空或为"Unknown Store"，且有商品项，使用第一个商品名称作为商家名称
-        if ((!parsedResult.storeName || parsedResult.storeName === 'Unknown Store') && parsedResult.items && Array.isArray(parsedResult.items) && parsedResult.items.length > 0) {
+        // 如果供应商名称为空或为"Unknown Supplier"，且有商品项，使用第一个商品名称作为供应商名称
+        if ((!parsedResult.supplierName || parsedResult.supplierName === 'Unknown Supplier') && parsedResult.items && Array.isArray(parsedResult.items) && parsedResult.items.length > 0) {
           const firstItem = parsedResult.items[0];
           if (firstItem && firstItem.name) {
-            console.log('Store name not found, using first item name as store name:', firstItem.name);
-            parsedResult.storeName = firstItem.name;
+            console.log('Supplier name not found, using first item name as supplier name:', firstItem.name);
+            parsedResult.supplierName = firstItem.name;
           }
         }
 
         // 验证必需字段
-        if (!parsedResult.storeName || !parsedResult.date || parsedResult.totalAmount === undefined) {
+        if (!parsedResult.supplierName || !parsedResult.date || parsedResult.totalAmount === undefined) {
           console.error('Missing required fields:', {
-            storeName: !!parsedResult.storeName,
+            supplierName: !!parsedResult.supplierName,
             date: !!parsedResult.date,
             totalAmount: parsedResult.totalAmount !== undefined,
           });
-          throw new Error('Missing required fields: storeName, date, or totalAmount');
+          throw new Error('Missing required fields: supplierName, date, or totalAmount');
         }
 
         // 确保 items 是数组且不为空
@@ -987,7 +1019,7 @@ Example JSON format:
 
         console.log('Parsed result items count:', parsedResult.items.length);
         console.log('Parsed result:', {
-          storeName: parsedResult.storeName,
+          supplierName: parsedResult.supplierName,
           date: parsedResult.date,
           totalAmount: parsedResult.totalAmount,
           itemsCount: parsedResult.items.length,
@@ -1029,7 +1061,7 @@ Example JSON format:
         }
 
         console.log('Final parsed result:', {
-          storeName: parsedResult.storeName,
+          supplierName: parsedResult.supplierName,
           date: parsedResult.date,
           totalAmount: parsedResult.totalAmount,
           currency: parsedResult.currency,
@@ -1096,37 +1128,44 @@ export async function recognizeReceiptFromAudio(audioUri: string): Promise<Gemin
     purposeNames = ['Home', 'Gifts', 'Business'];
   }
 
-  // 获取用户历史小票中最频繁的币种，作为默认币种
-  let defaultCurrency = 'USD'; // 音频识别的默认值
+  // 获取用户已有的支付账户列表（按使用频率排序）
+  let paymentAccountNames: string[] = [];
   try {
-    const mostFrequentCurrency = await getMostFrequentCurrency();
-    if (mostFrequentCurrency) {
-      defaultCurrency = mostFrequentCurrency;
-      console.log('Using most frequent currency as default:', defaultCurrency);
-    } else {
-      console.log('No currency history found, using default:', defaultCurrency);
-    }
+    const paymentAccounts = await getPaymentAccounts();
+    paymentAccountNames = paymentAccounts.map(pa => pa.name);
   } catch (error) {
-    console.warn('Failed to fetch most frequent currency, using default:', error);
+    console.warn('Failed to fetch payment accounts:', error);
+  }
+
+  // 获取用户历史小票中的币种列表（按使用频率排序）
+  let userCurrencies: string[] = [];
+  try {
+    userCurrencies = await getCurrenciesByUsage();
+    console.log('User currencies by usage:', userCurrencies);
+  } catch (error) {
+    console.warn('Failed to fetch currency usage:', error);
   }
 
   const categoryList = categoryNames.join(', ');
   const purposeList = purposeNames.join(', ');
+  const paymentAccountList = paymentAccountNames.length > 0 ? paymentAccountNames.join(', ') : '';
+  const defaultCurrency = userCurrencies.length > 0 ? userCurrencies[0] : 'USD';
+  const currencyList = userCurrencies.length > 0 ? userCurrencies.join(', ') : 'USD, CAD, CNY';
 
   const prompt = `You are a financial expert. Please analyze the receipt information from this audio recording and extract:
-1. Store name (storeName)
+1. Supplier name (supplierName)
 2. Date (date, format: YYYY-MM-DD, use today's date if not mentioned)
 3. Total amount (totalAmount, numeric type)
-4. Currency (currency, such as: CNY, USD, etc., default to ${defaultCurrency} if not mentioned)
-5. Payment account (paymentAccountName, if available, MUST include key distinguishing information such as:
-   - Card number suffix (last 4 digits, e.g., ****1234, *1234, Last 4: 1234)
-   - Account type (Credit Card, Debit Card, Cash, etc.)
-   - Any other identifying information that helps distinguish different payment methods)
+4. Currency (currency): User's most frequently used currencies: [${currencyList}]. Use "${defaultCurrency}" as default if not mentioned
+5. Payment account (paymentAccountName, if available):
+   - IMPORTANT: If the payment info matches any of these existing accounts, use the EXACT same name: [${paymentAccountList || 'No existing accounts'}]
+   - Match by card suffix (last 4 digits) or payment type when possible
+   - If no match found, create a new descriptive name with card type and last 4 digits (e.g., "Visa *1234", "Cash")
 6. Tax amount (tax, numeric type, 0 if not available)
 7. Detailed item list (items), each item contains:
    - Name (name)
    - Category (categoryName): Automatically select one from [${categoryList}] based on item content
-   - Purpose (purpose): Select one from [${purposeList}]. DEFAULT to "Home" unless there is clear evidence indicating otherwise (e.g., explicit business expense mention, gift purchase indication). Most receipts are personal/family use, so use "Home" as the default.
+   - Purpose (purpose): You MUST select EXACTLY one from this list: [${purposeList}]. Use the FIRST option "${purposeNames[0]}" as the default unless there is clear evidence indicating a different purpose. IMPORTANT: The value MUST match one of the listed options EXACTLY (case-sensitive). Do NOT use any value not in this list.
    - Unit price (price, numeric type, can be negative for refunds)
 8. Data consistency check (dataConsistency):
    - itemsSum: Sum of all item prices (calculate: sum of all items.price)
@@ -1140,7 +1179,7 @@ export async function recognizeReceiptFromAudio(audioUri: string): Promise<Gemin
 
 Please return strictly in JSON format without any extra text. JSON format as follows:
 {
-  "storeName": "Store Name",
+  "supplierName": "Supplier Name",
   "date": "2024-03-13",
   "totalAmount": 123.45,
   "currency": "USD",
@@ -1220,7 +1259,7 @@ Please return strictly in JSON format without any extra text. JSON format as fol
         const parsedResult: any = JSON.parse(jsonMatch[0]);
 
         // 验证必需字段
-        if (!parsedResult.storeName || !parsedResult.date || parsedResult.totalAmount === undefined) {
+        if (!parsedResult.supplierName || !parsedResult.date || parsedResult.totalAmount === undefined) {
           throw new Error('Missing required fields in response');
         }
 

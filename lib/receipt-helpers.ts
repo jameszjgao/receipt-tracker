@@ -16,8 +16,7 @@ export async function convertGeminiResultToReceipt(result: GeminiReceiptResult):
 
   // 处理供应商（排除无效的供应商名称，如 "Processing..." 等）
   let supplierId: string | undefined;
-  // Gemini API 返回的是 storeName，我们将其作为 supplierName 处理
-  const supplierName = result.storeName;
+  const supplierName = result.supplierName;
   if (supplierName && supplierName.trim()) {
     const trimmedSupplierName = supplierName.trim();
     // 排除处理状态等无效名称
@@ -114,6 +113,16 @@ export async function convertGeminiResultToReceipt(result: GeminiReceiptResult):
           || await findPurposeByName(item.purposeName);
         if (purpose) {
           purposeId = purpose.id;
+        }
+      }
+      
+      // 如果找不到匹配的用途，使用默认用途
+      if (!purposeId && purposes.length > 0) {
+        // 优先使用默认用途，否则使用第一个用途
+        const defaultPurpose = purposes.find(p => p.isDefault) || purposes[0];
+        if (defaultPurpose) {
+          purposeId = defaultPurpose.id;
+          console.warn(`用途 "${item.purposeName}" 未找到，使用默认用途: ${defaultPurpose.name}`);
         }
       }
 
@@ -221,7 +230,7 @@ export async function convertGeminiResultToReceipt(result: GeminiReceiptResult):
 
   return {
     spaceId: spaceId,
-    supplierName: result.storeName, // Gemini API 返回的是 storeName，映射为 supplierName
+    supplierName: result.supplierName,
     supplierId: supplierId,
     totalAmount: result.totalAmount,
     currency: result.currency,

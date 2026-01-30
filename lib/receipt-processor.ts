@@ -101,7 +101,7 @@ export async function processReceiptInBackground(
     );
 
     // 异步识别供应商详细信息（即使基本识别已有信息，也尝试获取更完整的信息）
-    recognizeSupplierInfo(finalImageUrl, receipt.supplierName || recognizedData.storeName)
+    recognizeSupplierInfo(finalImageUrl, receipt.supplierName || recognizedData.supplierName)
       .then(async (detailedSupplierInfo) => {
         try {
           console.log('[Supplier Info] 异步识别供应商详细信息完成:', detailedSupplierInfo);

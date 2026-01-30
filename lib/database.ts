@@ -507,6 +507,12 @@ export async function updateReceiptItem(
 
 // 获取用户历史小票中最频繁的币种
 export async function getMostFrequentCurrency(): Promise<string | null> {
+  const currencies = await getCurrenciesByUsage();
+  return currencies.length > 0 ? currencies[0] : null;
+}
+
+// 获取用户历史小票中所有币种（按使用频率降序排列）
+export async function getCurrenciesByUsage(): Promise<string[]> {
   try {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
@@ -519,16 +525,16 @@ export async function getMostFrequentCurrency(): Promise<string | null> {
     const { data, error } = await supabase
       .from('receipts')
       .select('currency')
-                .eq('space_id', spaceId)
+      .eq('space_id', spaceId)
       .not('currency', 'is', null);
 
     if (error) {
       console.warn('Error fetching currency statistics:', error);
-      return null;
+      return [];
     }
 
     if (!data || data.length === 0) {
-      return null;
+      return [];
     }
 
     // 统计币种出现频次
@@ -540,20 +546,15 @@ export async function getMostFrequentCurrency(): Promise<string | null> {
       }
     });
 
-    // 找到出现次数最多的币种
-    let mostFrequentCurrency: string | null = null;
-    let maxCount = 0;
-    for (const [currency, count] of Object.entries(currencyCount)) {
-      if (count > maxCount) {
-        maxCount = count;
-        mostFrequentCurrency = currency;
-      }
-    }
+    // 按使用频率降序排列
+    const sortedCurrencies = Object.entries(currencyCount)
+      .sort((a, b) => b[1] - a[1])
+      .map(([currency]) => currency);
 
-    return mostFrequentCurrency;
+    return sortedCurrencies;
   } catch (error) {
-    console.warn('Error getting most frequent currency:', error);
-    return null;
+    console.warn('Error getting currencies by usage:', error);
+    return [];
   }
 }
 

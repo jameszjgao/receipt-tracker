@@ -130,7 +130,7 @@ export interface DataConsistency {
 
 // Gemini识别结果（使用分类名称，后续会匹配到分类ID）
 export interface GeminiReceiptResult {
-  storeName: string;
+  supplierName: string;
   supplierInfo?: {
     taxNumber?: string; // 税号
     phone?: string; // 电话

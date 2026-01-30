@@ -268,7 +268,14 @@ export default function ReceiptDetailsScreen() {
           updatedItem.category = selectedCategory;
         }
       } else if (field === 'purposeId') {
-        updatedItem.purposeId = value as string | null;
+        const selectedPurpose = purposes.find(p => p.id === value);
+        if (selectedPurpose) {
+          updatedItem.purposeId = value;
+          updatedItem.purpose = selectedPurpose;
+        } else {
+          updatedItem.purposeId = value as string | null;
+          updatedItem.purpose = undefined;
+        }
       } else if (field === 'isAsset') {
         updatedItem.isAsset = value;
       }

@@ -16,6 +16,7 @@ export async function getPaymentAccounts(): Promise<PaymentAccount[]> {
       .from('payment_accounts')
       .select('*')
       .eq('space_id', spaceId)
+      .order('usage_count', { ascending: false, nullsFirst: false })
       .order('is_ai_recognized', { ascending: false })
       .order('name', { ascending: true });
 
@@ -169,11 +170,12 @@ export async function findOrCreatePaymentAccount(name: string, isAiRecognized: b
     const spaceId = user.currentSpaceId || user.spaceId;
     if (!spaceId) throw new Error('No space selected');
 
-    // 获取所有支付账户
+    // 获取所有支付账户，按使用频率排序
     const { data: allAccounts, error: fetchError } = await supabase
       .from('payment_accounts')
       .select('*')
-      .eq('space_id', spaceId);
+      .eq('space_id', spaceId)
+      .order('usage_count', { ascending: false, nullsFirst: false });
 
     if (fetchError) throw fetchError;
 

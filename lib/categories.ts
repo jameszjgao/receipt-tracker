@@ -16,6 +16,7 @@ export async function getCategories(): Promise<Category[]> {
       .from('categories')
       .select('*')
       .eq('space_id', spaceId)
+      .order('usage_count', { ascending: false, nullsFirst: false })
       .order('is_default', { ascending: false })
       .order('name', { ascending: true });
 
