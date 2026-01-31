@@ -11,13 +11,14 @@ import {
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { getCurrentUser, getCurrentSpace, setCurrentSpace, getUserSpaces } from '@/lib/auth';
+import { getCurrentUser, getCurrentSpace, setCurrentSpace, getUserSpaces, isAuthenticated } from '@/lib/auth';
 import { initializeAuthCache } from '@/lib/auth-cache';
 import { getPendingInvitationsForUser, acceptInvitation, declineInvitation } from '@/lib/space-invitations';
 import { supabase } from '@/lib/supabase';
 
 export default function HandleInvitationsScreen() {
   const router = useRouter();
+  const [isAuthed, setIsAuthed] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteId, setInviteId] = useState<string | null>(null);
@@ -28,8 +29,18 @@ export default function HandleInvitationsScreen() {
   const [pendingInvitations, setPendingInvitations] = useState<Array<{ id: string; spaceId: string; name: string; inviterEmail?: string; spaceName?: string }>>([]);
   const [currentInvitationIndex, setCurrentInvitationIndex] = useState(0);
 
+  // 认证检查：未登录时重定向到登录页
   useEffect(() => {
-    checkInvitations();
+    const checkAuth = async () => {
+      const authed = await isAuthenticated();
+      if (!authed) {
+        router.replace('/login');
+        return;
+      }
+      setIsAuthed(true);
+      checkInvitations();
+    };
+    checkAuth();
   }, []);
 
   const checkInvitations = async () => {
@@ -393,6 +404,11 @@ export default function HandleInvitationsScreen() {
       router.replace('/setup-space');
     }
   };
+
+  // 未认证时不渲染（等待重定向）
+  if (isAuthed === null || isAuthed === false) {
+    return null;
+  }
 
   if (loading) {
     return (

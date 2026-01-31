@@ -14,7 +14,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { createSpace, getCurrentUser, getUserSpaces, signOut } from '@/lib/auth';
+import { createSpace, getCurrentUser, getUserSpaces, signOut, isAuthenticated } from '@/lib/auth';
 import { getPendingInvitationsForUser, acceptInvitation, declineInvitation, SpaceInvitation } from '@/lib/space-invitations';
 import { supabase } from '@/lib/supabase';
 import { initializeAuthCache } from '@/lib/auth-cache';
@@ -23,6 +23,7 @@ export default function SetupHouseholdScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ inviteId?: string }>();
   const [loading, setLoading] = useState(true);
+  const [isAuthed, setIsAuthed] = useState<boolean | null>(null);
   const [pendingInvitations, setPendingInvitations] = useState<SpaceInvitation[]>([]);
   const [selectedInvitation, setSelectedInvitation] = useState<SpaceInvitation | null>(null);
   const [spaceNames, setSpaceNames] = useState<Record<string, string>>({});
@@ -32,8 +33,18 @@ export default function SetupHouseholdScreen() {
   const [newSpaceAddress, setNewSpaceAddress] = useState('');
   const [mode, setMode] = useState<'invite' | 'create'>('invite'); // 'invite' 显示邀请，'create' 显示创建表单
 
+  // 认证检查：未登录时重定向到登录页
   useEffect(() => {
-    loadInvitations();
+    const checkAuth = async () => {
+      const authed = await isAuthenticated();
+      if (!authed) {
+        router.replace('/login');
+        return;
+      }
+      setIsAuthed(true);
+      loadInvitations();
+    };
+    checkAuth();
   }, []);
 
   useEffect(() => {
@@ -260,6 +271,11 @@ export default function SetupHouseholdScreen() {
       ]
     );
   };
+
+  // 未认证时不渲染（等待重定向）
+  if (isAuthed === null || isAuthed === false) {
+    return null;
+  }
 
   if (loading) {
     return (

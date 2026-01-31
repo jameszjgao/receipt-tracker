@@ -27,6 +27,7 @@ import { SwipeableRow } from './SwipeableRow';
 import { uploadReceiptImageTemp } from '@/lib/supabase';
 import { processReceiptInBackground } from '@/lib/receipt-processor';
 import { processImageForUpload } from '@/lib/image-processor';
+import { getExchangeRates, sumAmountsInCurrency } from '@/lib/exchange-rates';
 
 // 分组类型：
 // - month: 按交易时间（票面日期）的月份分组
@@ -49,6 +50,49 @@ const statusLabels: Record<ReceiptStatus, string> = {
   confirmed: 'Confirmed',
   needs_retake: 'Needs Retake',
   duplicate: 'Duplicate',
+};
+
+// 根据币种代码获取货币符号
+const getCurrencySymbol = (currency?: string): string => {
+  const symbols: Record<string, string> = {
+    USD: '$',
+    CAD: 'C$',
+    CNY: '¥',
+    JPY: '¥',
+    EUR: '€',
+    GBP: '£',
+    AUD: 'A$',
+    HKD: 'HK$',
+    TWD: 'NT$',
+    KRW: '₩',
+    SGD: 'S$',
+    MXN: 'MX$',
+    INR: '₹',
+    THB: '฿',
+    VND: '₫',
+    PHP: '₱',
+    MYR: 'RM',
+    IDR: 'Rp',
+  };
+  return symbols[currency || 'USD'] || (currency ? `${currency} ` : '$');
+};
+
+// 格式化金额，根据币种显示相应符号（返回字符串，用于简单场景）
+const formatAmount = (amount: number, currency?: string): string => {
+  const symbol = getCurrencySymbol(currency);
+  return `${symbol}${amount.toFixed(2)}`;
+};
+
+// 金额显示组件：符号弱化，数字突出
+const AmountText = ({ amount, currency, style }: { amount: number; currency?: string; style?: any }) => {
+  const symbol = getCurrencySymbol(currency);
+  const baseSize = style?.fontSize || 16;
+  return (
+    <Text style={style}>
+      <Text style={{ color: '#A0A0A0', fontSize: baseSize - 2 }}>{symbol}</Text>
+      <Text style={{ fontWeight: '600' }}>{amount.toFixed(2)}</Text>
+    </Text>
+  );
 };
 
 interface SectionData {
@@ -75,6 +119,8 @@ export default function ReceiptsScreen() {
   const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(new Set());
   const [selectedCreators, setSelectedCreators] = useState<Set<string>>(new Set());
   const [filterSubMenu, setFilterSubMenu] = useState<'main' | 'month' | 'recordDate' | 'account' | 'creator'>('main');
+  // 汇率缓存（用于跨币种金额折算）
+  const [exchangeRates, setExchangeRates] = useState<{ [key: string]: number } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showFabActions, setShowFabActions] = useState(false);
   const fabAnimation = useRef(new Animated.Value(0)).current;
@@ -122,10 +168,11 @@ export default function ReceiptsScreen() {
       const { scannedImages } = await DocumentScanner.scanDocument({
         maxNumDocuments: 1,
         croppedImageQuality: 90,
-      });
+        letUserAdjustCrop: false,  // 自动裁剪，无需手动调整
+      } as any);
 
       if (scannedImages && scannedImages.length > 0) {
-        // DocumentScanner 已经在原生侧做过裁剪，这里不再启用自动裁剪，避免二次截断
+        // 自动裁剪后直接处理，实现 Snap 即拍即传
         processCapturedImage(scannedImages[0], false);
       }
     } catch (error) {
@@ -390,6 +437,8 @@ export default function ReceiptsScreen() {
   useFocusEffect(
     useCallback(() => {
       loadReceipts();
+      // 异步加载汇率（不阻塞 UI）
+      getExchangeRates().then(rates => setExchangeRates(rates));
     }, [])
   );
 
@@ -980,7 +1029,7 @@ export default function ReceiptsScreen() {
                 )}
                   </View>
                   <View style={styles.secondRow}>
-                    <Text style={styles.amount}>${item.totalAmount.toFixed(2)}</Text>
+                    <AmountText amount={item.totalAmount} currency={item.currency} style={styles.amount} />
                     <Text style={styles.date}>{formatDate(item.date)}</Text>
                     <Text style={styles.createdDate}>
                       {item.createdAt ? formatTimeAgo(item.createdAt) : formatDate(item.date)}
@@ -998,7 +1047,23 @@ export default function ReceiptsScreen() {
           // 只统计"已确认"状态的小票
           const confirmedReceipts = dataForStats.filter((receipt: Receipt) => receipt.status === 'confirmed');
           const confirmedCount = confirmedReceipts.length;
-          const totalAmount = confirmedReceipts.reduce((sum: number, receipt: Receipt) => sum + receipt.totalAmount, 0);
+          
+          // 获取分组中最常见的币种用于显示
+          const currencies = confirmedReceipts.map((r: Receipt) => r.currency || 'USD');
+          const dominantCurrency = currencies.length > 0 
+            ? currencies.sort((a: string, b: string) => 
+                currencies.filter((v: string) => v === a).length - currencies.filter((v: string) => v === b).length
+              ).pop() 
+            : 'USD';
+          
+          // 如果有汇率数据，将所有金额折算为主要币种后合计；否则直接相加
+          const totalAmount = exchangeRates
+            ? sumAmountsInCurrency(
+                confirmedReceipts.map((r: Receipt) => ({ amount: r.totalAmount, currency: r.currency || 'USD' })),
+                dominantCurrency || 'USD',
+                exchangeRates
+              )
+            : confirmedReceipts.reduce((sum: number, receipt: Receipt) => sum + receipt.totalAmount, 0);
           
           return (
             <TouchableOpacity
@@ -1010,7 +1075,7 @@ export default function ReceiptsScreen() {
                 <Text style={styles.sectionTitle}>{section.title}</Text>
                 <View style={styles.sectionHeaderRight}>
                   <Text style={styles.sectionCount}>{confirmedCount} receipts</Text>
-                  <Text style={styles.sectionAmount}>${totalAmount.toFixed(2)}</Text>
+                  <AmountText amount={totalAmount} currency={dominantCurrency} style={styles.sectionAmount} />
                   <Ionicons
                     name={isCollapsed ? 'chevron-forward' : 'chevron-down'}
                     size={20}

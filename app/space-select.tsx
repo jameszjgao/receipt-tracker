@@ -13,12 +13,13 @@ import {
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { getUserSpaces, setCurrentSpace, createSpace, getCurrentUser, getCurrentSpace } from '@/lib/auth';
+import { getUserSpaces, setCurrentSpace, createSpace, getCurrentUser, getCurrentSpace, isAuthenticated } from '@/lib/auth';
 import { UserSpace } from '@/types';
 import { initializeAuthCache } from '@/lib/auth-cache';
 
 export default function SpaceSelectScreen() {
   const router = useRouter();
+  const [isAuthed, setIsAuthed] = useState<boolean | null>(null);
   const [spaces, setSpaces] = useState<UserSpace[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -26,8 +27,18 @@ export default function SpaceSelectScreen() {
   const [newSpaceName, setNewSpaceName] = useState('');
   const [newSpaceAddress, setNewSpaceAddress] = useState('');
 
+  // 认证检查：未登录时重定向到登录页
   useEffect(() => {
-    loadSpaces();
+    const checkAuth = async () => {
+      const authed = await isAuthenticated();
+      if (!authed) {
+        router.replace('/login');
+        return;
+      }
+      setIsAuthed(true);
+      loadSpaces();
+    };
+    checkAuth();
   }, []);
 
   const loadSpaces = async () => {
@@ -114,6 +125,11 @@ export default function SpaceSelectScreen() {
       setCreating(false);
     }
   };
+
+  // 未认证时不渲染（等待重定向）
+  if (isAuthed === null || isAuthed === false) {
+    return null;
+  }
 
   if (loading) {
     return (

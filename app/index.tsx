@@ -438,10 +438,11 @@ export default function HomeScreen() {
       const { scannedImages } = await DocumentScanner.scanDocument({
         maxNumDocuments: 1,
         croppedImageQuality: 90,
-      });
+        letUserAdjustCrop: false,  // 自动裁剪，无需手动调整
+      } as any);
 
       if (scannedImages && scannedImages.length > 0) {
-        // DocumentScanner 已经做过一次精确裁剪，这里不再做二次自动裁剪，以免截断票面
+        // 自动裁剪后直接处理，实现 Snap 即拍即传
         processCapturedImage(scannedImages[0], false);
       }
     } catch (error) {
@@ -533,16 +534,9 @@ export default function HomeScreen() {
     scanDocument();
   };
 
+  // 认证检查中，不渲染任何内容（避免闪烁）
   if (isLoggedIn === null) {
-    return (
-      <View style={styles.container}>
-        <StatusBar style="dark" />
-        <View style={styles.content}>
-          <ActivityIndicator size="large" color="#6C5CE7" />
-          <Text style={styles.title}>Loading...</Text>
-        </View>
-      </View>
-    );
+    return null;
   }
 
   if (!isLoggedIn) {
