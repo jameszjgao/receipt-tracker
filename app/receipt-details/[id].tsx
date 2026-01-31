@@ -22,6 +22,8 @@ import { uploadReceiptImage } from '@/lib/supabase';
 import { getCategories } from '@/lib/categories';
 import { getPurposes } from '@/lib/purposes';
 import { getPaymentAccounts } from '@/lib/payment-accounts';
+import { getChatLogsByReceiptId } from '@/lib/chat-logs';
+import { playAudio, stopPlayback } from '@/lib/audio';
 import { Receipt, ReceiptItem, Category, Purpose, ReceiptStatus, PaymentAccount } from '@/types';
 import { format } from 'date-fns';
 
@@ -44,6 +46,8 @@ export default function ReceiptDetailsScreen() {
   const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
   const [taxInputText, setTaxInputText] = useState<string>('');
   const [priceInputTexts, setPriceInputTexts] = useState<{ [index: number]: string }>({});
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
   useEffect(() => {
     loadReceipt();
@@ -95,6 +99,17 @@ export default function ReceiptDetailsScreen() {
       const data = await getReceiptById(id);
       setReceipt(data);
       setEditedReceipt(data);
+      
+      // 获取该小票对应的聊天记录，查找 audioUrl
+      try {
+        const chatLogs = await getChatLogsByReceiptId(id);
+        const audioLog = chatLogs.find(log => log.audioUrl);
+        if (audioLog?.audioUrl) {
+          setAudioUrl(audioLog.audioUrl);
+        }
+      } catch (chatError) {
+        console.log('Failed to get chat logs for audio:', chatError);
+      }
       
       // 如果是新创建的小票，自动进入编辑模式
       if (isNew === 'true') {
@@ -453,6 +468,23 @@ export default function ReceiptDetailsScreen() {
     }
   };
 
+  // 播放/停止录音
+  const handlePlayAudio = async () => {
+    if (!audioUrl) return;
+    
+    if (isPlayingAudio) {
+      await stopPlayback();
+      setIsPlayingAudio(false);
+    } else {
+      setIsPlayingAudio(true);
+      await playAudio(audioUrl, () => {
+        // 播放完成后重置状态
+        setIsPlayingAudio(false);
+      });
+    }
+  };
+
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -484,33 +516,51 @@ export default function ReceiptDetailsScreen() {
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         {/* 小票摘要卡片 */}
         <View style={styles.summaryCard}>
-          <TouchableOpacity
-            onPress={() => {
-              if (currentReceipt.imageUrl) {
-                setShowImageModal(true);
-              } else {
-                handleImagePicker();
-              }
-            }}
-            style={styles.imagePlaceholder}
-            disabled={isUploadingImage}
-          >
-            {currentReceipt.imageUrl ? (
-              <Image
-                source={{ uri: currentReceipt.imageUrl }}
-                style={styles.receiptImage}
-                resizeMode="cover"
-              />
-            ) : (
-              <View style={styles.imagePlaceholderContent}>
-                {isUploadingImage ? (
-                  <ActivityIndicator size="small" color="#6C5CE7" />
-                ) : (
-                  <Ionicons name="camera" size={32} color="#95A5A6" />
-                )}
-              </View>
+          <View style={styles.imageContainer}>
+            <TouchableOpacity
+              onPress={() => {
+                if (currentReceipt.imageUrl) {
+                  setShowImageModal(true);
+                } else {
+                  handleImagePicker();
+                }
+              }}
+              style={styles.imagePlaceholder}
+              disabled={isUploadingImage}
+            >
+              {currentReceipt.imageUrl ? (
+                <Image
+                  source={{ uri: currentReceipt.imageUrl }}
+                  style={styles.receiptImage}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={styles.imagePlaceholderContent}>
+                  {isUploadingImage ? (
+                    <ActivityIndicator size="small" color="#6C5CE7" />
+                  ) : (
+                    <Ionicons name="camera" size={32} color="#95A5A6" />
+                  )}
+                </View>
+              )}
+            </TouchableOpacity>
+            {/* 语音录入播放按钮 - 显示在图片右下角 */}
+            {audioUrl && (
+              <TouchableOpacity
+                style={[
+                  styles.audioPlayButton,
+                  isPlayingAudio && styles.audioPlayButtonActive,
+                ]}
+                onPress={handlePlayAudio}
+              >
+                <Ionicons 
+                  name={isPlayingAudio ? 'pause' : 'play'} 
+                  size={14} 
+                  color="#fff" 
+                />
+              </TouchableOpacity>
             )}
-          </TouchableOpacity>
+          </View>
           <View style={styles.summaryContent}>
             <View style={styles.summaryContentTop}>
               <View style={styles.summaryContentMain}>
@@ -1415,12 +1465,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'stretch',
   },
+  imageContainer: {
+    position: 'relative',
+    marginRight: 12,
+  },
   imagePlaceholder: {
     width: 80,
     height: 80,
     borderRadius: 8,
     backgroundColor: '#E9ECEF',
-    marginRight: 12,
     overflow: 'hidden',
     justifyContent: 'center',
     alignItems: 'center',
@@ -1430,6 +1483,27 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  audioPlayButton: {
+    position: 'absolute',
+    bottom: 0,
+    left: '50%',
+    marginLeft: -12,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#6C5CE7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingLeft: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  audioPlayButtonActive: {
+    backgroundColor: '#E74C3C',
   },
   receiptImage: {
     width: '100%',

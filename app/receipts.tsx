@@ -1014,7 +1014,15 @@ export default function ReceiptsScreen() {
                 {item.status === 'confirmed' ? (
                   <View style={styles.confirmedStatusContainer}>
                     <View style={styles.confirmedBadge}>
-                      <Ionicons name="checkmark" size={14} color="#fff" />
+                      <Ionicons 
+                        name={
+                          item.inputType === 'audio' ? 'mic' :
+                          item.inputType === 'text' ? 'menu' :
+                          'camera'
+                        } 
+                        size={12} 
+                        color="#fff" 
+                      />
                     </View>
                     {item.createdByUser && (
                       <Text style={styles.confirmedByText}>

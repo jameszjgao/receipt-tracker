@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
   Alert,
   ActivityIndicator,
   TextInput,
@@ -11,16 +12,26 @@ import {
   Platform,
   ScrollView,
   Keyboard,
+  Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { Ionicons } from '@expo/vector-icons';
-import { recognizeReceiptFromText } from '@/lib/gemini';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { recognizeReceiptFromText, recognizeReceiptFromAudio } from '@/lib/gemini';
 import { saveReceipt, updateReceipt, getReceiptById } from '@/lib/database';
 import { saveChatLog, getChatLogsPaginated } from '@/lib/chat-logs';
 import { ReceiptStatus, Receipt } from '@/types';
 import { convertGeminiResultToReceipt } from '@/lib/receipt-helpers';
 import { format } from 'date-fns';
+import { 
+  startRecording, 
+  stopRecording, 
+  cancelRecording, 
+  uploadAudioFile, 
+  playAudio, 
+  stopPlayback,
+  requestAudioPermission,
+} from '@/lib/audio';
 
 // 格式化货币显示
 const formatCurrency = (amount: number, currency?: string): string => {
@@ -43,6 +54,8 @@ interface Message {
   timestamp: Date;
   receiptPreview?: Receipt; // 识别结果预览
   receiptDeleted?: boolean; // 对应小票是否已被删除（用于更新按钮状态）
+  audioUrl?: string; // 语音消息的录音 URL
+  isPlayingAudio?: boolean; // 是否正在播放此音频
 }
 
 export default function VoiceInputScreen() {
@@ -57,6 +70,43 @@ export default function VoiceInputScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  
+  // 语音模式相关状态（默认语音模式）
+  const [isVoiceMode, setIsVoiceMode] = useState(true);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const recordingTimer = useRef<NodeJS.Timeout | null>(null);
+  const recordingAnimation = useRef(new Animated.Value(1)).current;
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const isStartingRecording = useRef(false);
+  const isRecordingRef = useRef(false); // 用 ref 跟踪录音状态，避免闭包问题
+  const recordingDurationRef = useRef(0);
+  const isLongPressMode = useRef(false); // 是否是长按模式（按住录音）
+  const pressStartTime = useRef(0); // 按下的时间戳
+  
+  // Toast 提示
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  
+  // 显示 Toast
+  const showToast = (message: string, duration: number = 1500) => {
+    setToastMessage(message);
+    Animated.sequence([
+      Animated.timing(toastOpacity, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.delay(duration),
+      Animated.timing(toastOpacity, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setToastMessage(null);
+    });
+  };
 
   useEffect(() => {
     // 首次加载：拉取最近的历史聊天记录（例如最近 20 条）
@@ -88,13 +138,14 @@ export default function VoiceInputScreen() {
         const restoredMessages: Message[] = [];
 
         for (const log of sorted) {
-          // 用户输入
+          // 用户输入（包含语音录入的 audioUrl）
           if (log.prompt) {
             restoredMessages.push({
               id: `${log.id}-prompt`,
-              text: log.prompt,
+              text: log.audioUrl ? `🎤 Voice` : log.prompt,
               isUser: true,
               timestamp: new Date(log.createdAt),
+              audioUrl: log.audioUrl,
             });
           }
 
@@ -103,7 +154,7 @@ export default function VoiceInputScreen() {
             const preview = log.responseData.receiptPreview as Receipt;
             restoredMessages.push({
               id: `${log.id}-preview`,
-              text: 'I\'ve extracted the receipt details:',
+              text: '',
               isUser: false,
               timestamp: new Date(log.createdAt),
               receiptPreview: preview,
@@ -228,7 +279,7 @@ export default function VoiceInputScreen() {
             const preview = log.responseData.receiptPreview as Receipt;
             moreMessagesRaw.push({
               id: `${log.id}-preview`,
-              text: 'I\'ve extracted the receipt details:',
+              text: '',
               isUser: false,
               timestamp: new Date(log.createdAt),
               receiptPreview: preview,
@@ -336,17 +387,18 @@ export default function VoiceInputScreen() {
       // 转换为Receipt格式
       const receipt = await convertGeminiResultToReceipt(result);
       
-      // 保存到数据库（确保状态为pending）
+      // 保存到数据库（确保状态为pending，标记为文字输入）
       const receiptToSave = {
         ...receipt,
         status: 'pending' as ReceiptStatus,
+        inputType: 'text' as const,
       };
       const receiptId = await saveReceipt(receiptToSave);
 
       // 添加识别结果预览消息（包含支付账户信息用于显示，状态为pending）
       const previewMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: `I've extracted the receipt details:`,
+        text: '',
         isUser: false,
         timestamp: new Date(),
         receiptPreview: { 
@@ -400,6 +452,238 @@ export default function VoiceInputScreen() {
     }
   };
 
+  // 开始录音
+  const handleStartRecording = async () => {
+    // 防止重复触发
+    if (isRecordingRef.current || isStartingRecording.current || isProcessing) {
+      console.log('handleStartRecording: already recording or starting, skip');
+      return;
+    }
+    
+    isStartingRecording.current = true;
+    console.log('handleStartRecording: starting...');
+    
+    try {
+      const hasPermission = await requestAudioPermission();
+      if (!hasPermission) {
+        Alert.alert('Permission Required', 'Please allow microphone access to use voice input.');
+        return;
+      }
+
+      const started = await startRecording();
+      if (started) {
+        isRecordingRef.current = true;
+        recordingDurationRef.current = 0;
+        setIsRecording(true);
+        setRecordingDuration(0);
+        
+        // 开始计时
+        recordingTimer.current = setInterval(() => {
+          recordingDurationRef.current += 1;
+          setRecordingDuration(prev => prev + 1);
+        }, 1000);
+        
+        // 录音动画（脉动效果）
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(recordingAnimation, {
+              toValue: 1.2,
+              duration: 500,
+              useNativeDriver: true,
+            }),
+            Animated.timing(recordingAnimation, {
+              toValue: 1,
+              duration: 500,
+              useNativeDriver: true,
+            }),
+          ])
+        ).start();
+        
+        console.log('handleStartRecording: recording started successfully');
+      }
+    } finally {
+      isStartingRecording.current = false;
+    }
+  };
+
+  // 停止录音并发送
+  const handleStopRecording = async () => {
+    console.log('handleStopRecording: called, isRecordingRef=', isRecordingRef.current);
+    
+    // 使用 ref 检查，避免闭包问题
+    if (!isRecordingRef.current) {
+      console.log('handleStopRecording: not recording, skip');
+      return;
+    }
+    
+    // 立即标记为不再录音
+    isRecordingRef.current = false;
+    
+    // 停止计时和动画
+    if (recordingTimer.current) {
+      clearInterval(recordingTimer.current);
+      recordingTimer.current = null;
+    }
+    recordingAnimation.stopAnimation();
+    recordingAnimation.setValue(1);
+    setIsRecording(false);
+    
+    const duration = recordingDurationRef.current;
+    console.log('handleStopRecording: duration=', duration);
+    
+    // 录音时长太短（小于3秒），取消
+    if (duration < 3) {
+      await cancelRecording();
+      showToast('Recording too short');
+      return;
+    }
+    
+    setIsProcessing(true);
+    
+    try {
+      // 停止录音获取本地文件
+      const localUri = await stopRecording();
+      if (!localUri) {
+        throw new Error('Failed to get recording');
+      }
+
+      // 添加用户语音消息（先显示，稍后更新 audioUrl）
+      const userMessageId = Date.now().toString();
+      const userMessage: Message = {
+        id: userMessageId,
+        text: `🎤 Voice (${duration}s)`,
+        isUser: true,
+        timestamp: new Date(),
+        audioUrl: localUri, // 暂用本地 URI，上传后更新
+      };
+      setMessages(prev => [...prev, userMessage]);
+      
+      // 滚动到底部
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+
+      // 上传录音文件
+      const audioUrl = await uploadAudioFile(localUri);
+      if (!audioUrl) {
+        throw new Error('Failed to upload audio');
+      }
+      
+      // 更新消息中的 audioUrl
+      setMessages(prev => prev.map(msg => 
+        msg.id === userMessageId ? { ...msg, audioUrl } : msg
+      ));
+
+      // 调用 Gemini 识别语音
+      const result = await recognizeReceiptFromAudio(localUri);
+      
+      // 转换为 Receipt 格式
+      const receipt = await convertGeminiResultToReceipt(result);
+      
+      // 保存到数据库（标记为语音输入）
+      const receiptToSave = {
+        ...receipt,
+        status: 'pending' as ReceiptStatus,
+        inputType: 'audio' as const,
+      };
+      const receiptId = await saveReceipt(receiptToSave);
+
+      // 添加识别结果预览消息
+      const previewMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: '',
+        isUser: false,
+        timestamp: new Date(),
+        receiptPreview: { 
+          ...receiptToSave, 
+          id: receiptId,
+          status: 'pending' as ReceiptStatus,
+          paymentAccount: result.paymentAccountName ? {
+            id: receipt.paymentAccountId || '',
+            spaceId: receipt.spaceId,
+            name: result.paymentAccountName,
+            isAiRecognized: true,
+          } : undefined,
+        },
+      };
+      setMessages(prev => [...prev, previewMessage]);
+
+      // 保存聊天记录（包含 audioUrl）
+      await saveChatLog({
+        receiptId,
+        type: 'audio',
+        modelName: 'gemini',
+        prompt: `Voice input (${recordingDuration}s)`,
+        response: previewMessage.text,
+        requestData: { audioUrl },
+        responseData: { receiptPreview: previewMessage.receiptPreview },
+        success: true,
+        audioUrl,
+      });
+
+      // 滚动到底部
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    } catch (error) {
+      console.error('Error processing voice:', error);
+      
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: `❌ Error: ${error instanceof Error ? error.message : 'Failed to recognize receipt from voice'}`,
+        isUser: false,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    } finally {
+      setIsProcessing(false);
+      setRecordingDuration(0);
+      recordingDurationRef.current = 0;
+    }
+  };
+
+  // 取消录音
+  const handleCancelRecording = async () => {
+    isRecordingRef.current = false;
+    recordingDurationRef.current = 0;
+    if (recordingTimer.current) {
+      clearInterval(recordingTimer.current);
+      recordingTimer.current = null;
+    }
+    recordingAnimation.stopAnimation();
+    recordingAnimation.setValue(1);
+    setIsRecording(false);
+    setRecordingDuration(0);
+    await cancelRecording();
+  };
+
+  // 播放/停止音频
+  const handlePlayAudio = async (messageId: string, audioUrl: string) => {
+    if (playingAudioId === messageId) {
+      // 正在播放这条，停止
+      await stopPlayback();
+      setPlayingAudioId(null);
+    } else {
+      // 播放新的
+      setPlayingAudioId(messageId);
+      await playAudio(audioUrl, () => {
+        // 播放完成后重置状态
+        setPlayingAudioId(null);
+      });
+    }
+  };
+
+  // 格式化录音时长
+  const formatDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
@@ -428,19 +712,52 @@ export default function VoiceInputScreen() {
       >
         {messages.map((message) => (
           <View key={message.id}>
-            <View
-              style={[
-                styles.messageContainer,
-                message.isUser ? styles.userMessage : styles.botMessage,
-              ]}
-            >
-              <Text style={[
-                styles.messageText,
-                message.isUser ? styles.userMessageText : styles.botMessageText,
-              ]}>
-                {message.text}
-              </Text>
-            </View>
+            {/* 用户消息上方显示时间戳 */}
+            {message.isUser && (message.text || message.audioUrl) && (
+              <View style={styles.timestampDivider}>
+                <Text style={styles.timestampText}>
+                  {format(message.timestamp, 'MMM dd, HH:mm')}
+                </Text>
+              </View>
+            )}
+            
+            {/* 只在有内容时显示消息气泡 */}
+            {(message.text || message.audioUrl) && (
+              <View
+                style={[
+                  styles.messageContainer,
+                  message.isUser ? styles.userMessage : styles.botMessage,
+                ]}
+              >
+                {/* 语音消息：显示播放按钮 */}
+                {message.audioUrl ? (
+                  <TouchableOpacity
+                    style={styles.audioMessageContent}
+                    onPress={() => handlePlayAudio(message.id, message.audioUrl!)}
+                  >
+                    <Ionicons 
+                      name={playingAudioId === message.id ? 'pause-circle' : 'play-circle'} 
+                      size={32} 
+                      color={message.isUser ? '#fff' : '#6C5CE7'} 
+                    />
+                    <Text style={[
+                      styles.messageText,
+                      message.isUser ? styles.userMessageText : styles.botMessageText,
+                      { marginLeft: 8 }
+                    ]}>
+                      {message.text}
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={[
+                    styles.messageText,
+                    message.isUser ? styles.userMessageText : styles.botMessageText,
+                  ]}>
+                    {message.text}
+                  </Text>
+                )}
+              </View>
+            )}
             
             {/* 识别结果预览卡片 */}
             {message.receiptPreview && (
@@ -614,6 +931,7 @@ export default function VoiceInputScreen() {
                 </View>
               </View>
             )}
+            
           </View>
         ))}
         {isProcessing && (
@@ -626,51 +944,139 @@ export default function VoiceInputScreen() {
         )}
       </ScrollView>
 
+      {/* Toast 提示 - 显示在输入区域上方 */}
+      {toastMessage && (
+        <Animated.View style={[styles.toast, { opacity: toastOpacity }]}>
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </Animated.View>
+      )}
+
       <View style={[styles.inputContainer, { paddingBottom: Platform.OS === 'ios' ? (keyboardHeight || 20) : (keyboardHeight || 16) }]}>
-        <View style={styles.inputWrapper}>
-          <TextInput
-            ref={inputRef}
-            style={styles.input}
-            placeholder="Describe your purchase..."
-            placeholderTextColor="#95A5A6"
-            value={inputText}
-            onChangeText={setInputText}
-            multiline
-            maxLength={500}
-            editable={!isProcessing}
-            returnKeyType="send"
-            onSubmitEditing={handleSend}
-            blurOnSubmit={false}
-            onFocus={() => {
-              // 键盘弹出时滚动到底部
-              setTimeout(() => {
-                scrollViewRef.current?.scrollToEnd({ animated: true });
-              }, 100);
-            }}
-          />
-          {inputText.length > 0 && (
-            <TouchableOpacity
-              style={styles.clearButton}
-              onPress={() => setInputText('')}
-            >
-              <Ionicons name="close-circle" size={20} color="#95A5A6" />
-            </TouchableOpacity>
-          )}
-        </View>
+        {/* 语音/键盘切换按钮 */}
         <TouchableOpacity
-          style={[
-            styles.sendButton,
-            (!inputText.trim() || isProcessing) && styles.sendButtonDisabled,
-          ]}
-          onPress={handleSend}
-          disabled={!inputText.trim() || isProcessing}
+          style={styles.modeToggleButton}
+          onPress={() => {
+            setIsVoiceMode(!isVoiceMode);
+            if (!isVoiceMode) {
+              Keyboard.dismiss();
+            }
+          }}
+          disabled={isProcessing || isRecording}
         >
-          {isProcessing ? (
-            <ActivityIndicator size="small" color="#fff" />
+          {isVoiceMode ? (
+            <MaterialCommunityIcons name="keyboard-outline" size={24} color="#6C5CE7" />
           ) : (
-            <Ionicons name="send" size={20} color="#fff" />
+            <Ionicons name="mic-outline" size={24} color="#6C5CE7" />
           )}
         </TouchableOpacity>
+
+        {isVoiceMode ? (
+          // Voice mode: tap to start/stop OR hold to talk
+          <Pressable
+            style={({ pressed }) => [
+              styles.voiceButton,
+              isRecording && styles.voiceButtonRecording,
+              pressed && !isRecording && styles.voiceButtonPressed,
+            ]}
+            onPressIn={() => {
+              // 记录按下时间
+              pressStartTime.current = Date.now();
+              isLongPressMode.current = false;
+            }}
+            onLongPress={() => {
+              // 长按模式：开始录音
+              if (!isRecordingRef.current && !isProcessing) {
+                isLongPressMode.current = true;
+                handleStartRecording();
+              }
+            }}
+            onPressOut={() => {
+              const pressDuration = Date.now() - pressStartTime.current;
+              
+              if (isLongPressMode.current && isRecordingRef.current) {
+                // 长按模式：松手停止并提交
+                handleStopRecording();
+              } else if (pressDuration < 500) {
+                // 短按模式：点击切换录音状态
+                if (isRecordingRef.current) {
+                  // 正在录音，停止并提交
+                  handleStopRecording();
+                } else if (!isProcessing) {
+                  // 未在录音，开始录音
+                  isLongPressMode.current = false;
+                  handleStartRecording();
+                }
+              }
+            }}
+            delayLongPress={500}
+            disabled={isProcessing}
+          >
+            {isRecording ? (
+              <Animated.View style={{ transform: [{ scale: recordingAnimation }] }}>
+                <View style={styles.voiceButtonContent}>
+                  <Ionicons name="mic" size={24} color="#E74C3C" />
+                  <Text style={styles.voiceButtonTextRecording}>
+                    {formatDuration(recordingDuration)} - Tap to send
+                  </Text>
+                </View>
+              </Animated.View>
+            ) : (
+              <View style={styles.voiceButtonContent}>
+                <Ionicons name="mic-outline" size={24} color="#636E72" />
+                <Text style={styles.voiceButtonText}>Tap or hold to record</Text>
+              </View>
+            )}
+          </Pressable>
+        ) : (
+          // 文字模式：输入框
+          <View style={styles.inputWrapper}>
+            <TextInput
+              ref={inputRef}
+              style={styles.input}
+              placeholder="Describe your purchase..."
+              placeholderTextColor="#95A5A6"
+              value={inputText}
+              onChangeText={setInputText}
+              multiline
+              maxLength={500}
+              editable={!isProcessing}
+              returnKeyType="send"
+              onSubmitEditing={handleSend}
+              blurOnSubmit={false}
+              onFocus={() => {
+                setTimeout(() => {
+                  scrollViewRef.current?.scrollToEnd({ animated: true });
+                }, 100);
+              }}
+            />
+            {inputText.length > 0 && (
+              <TouchableOpacity
+                style={styles.clearButton}
+                onPress={() => setInputText('')}
+              >
+                <Ionicons name="close-circle" size={20} color="#95A5A6" />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* 发送按钮（仅文字模式显示） */}
+        {!isVoiceMode && (
+          <TouchableOpacity
+            style={[
+              styles.sendButton,
+              (!inputText.trim() || isProcessing) && styles.sendButtonDisabled,
+            ]}
+            onPress={handleSend}
+            disabled={!inputText.trim() || isProcessing}
+          >
+            {isProcessing ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Ionicons name="send" size={20} color="#fff" />
+            )}
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -680,6 +1086,25 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8F9FA',
+  },
+  toast: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(45, 52, 54, 0.9)',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  toastText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   backButton: {
     position: 'absolute',
@@ -776,6 +1201,17 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     backgroundColor: '#BDC3C7',
+  },
+  timestampDivider: {
+    alignItems: 'flex-end',
+    marginTop: 12,
+    marginBottom: 4,
+    marginRight: 16,
+  },
+  timestampText: {
+    fontSize: 11,
+    color: '#95A5A6',
+    fontWeight: '400',
   },
   receiptPreviewCard: {
     backgroundColor: '#fff',
@@ -884,5 +1320,51 @@ const styles = StyleSheet.create({
   },
   previewActionTextPrimary: {
     color: '#fff',
+  },
+  // 语音模式相关样式
+  modeToggleButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#F0EFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  voiceButton: {
+    flex: 1,
+    height: 44,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  voiceButtonRecording: {
+    backgroundColor: '#FFEBEE',
+    borderColor: '#E74C3C',
+  },
+  voiceButtonPressed: {
+    backgroundColor: '#F0F0F0',
+    borderColor: '#6C5CE7',
+  },
+  voiceButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  voiceButtonText: {
+    fontSize: 15,
+    color: '#636E72',
+    fontWeight: '500',
+  },
+  voiceButtonTextRecording: {
+    fontSize: 15,
+    color: '#E74C3C',
+    fontWeight: '600',
+  },
+  audioMessageContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 });

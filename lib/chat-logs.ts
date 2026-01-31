@@ -16,6 +16,7 @@ export interface ChatLog {
   errorMessage?: string;
   confidence?: number;
   processingTimeMs?: number;
+  audioUrl?: string; // 语音录入时的录音文件 URL
   createdAt: string;
 }
 
@@ -31,6 +32,7 @@ export interface CreateChatLogParams {
   errorMessage?: string;
   confidence?: number;
   processingTimeMs?: number;
+  audioUrl?: string; // 语音录入时的录音文件 URL
 }
 
 /**
@@ -66,6 +68,7 @@ export async function saveChatLog(params: CreateChatLogParams): Promise<void> {
         error_message: params.errorMessage || null,
         confidence: params.confidence || null,
         processing_time_ms: params.processingTimeMs || null,
+        audio_url: params.audioUrl || null,
       });
 
     if (error) {
@@ -127,6 +130,7 @@ export async function getChatLogs(limit: number = 100): Promise<ChatLog[]> {
       errorMessage: row.error_message,
       confidence: row.confidence,
       processingTimeMs: row.processing_time_ms,
+      audioUrl: row.audio_url,
       createdAt: row.created_at,
     }));
   } catch (error) {
@@ -187,6 +191,7 @@ export async function getChatLogsPaginated(
       errorMessage: row.error_message,
       confidence: row.confidence,
       processingTimeMs: row.processing_time_ms,
+      audioUrl: row.audio_url,
       createdAt: row.created_at,
     }));
   } catch (error) {
@@ -237,6 +242,7 @@ export async function getChatLogsByReceiptId(receiptId: string): Promise<ChatLog
       errorMessage: row.error_message,
       confidence: row.confidence,
       processingTimeMs: row.processing_time_ms,
+      audioUrl: row.audio_url,
       createdAt: row.created_at,
     }));
   } catch (error) {

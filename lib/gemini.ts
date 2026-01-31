@@ -1151,10 +1151,24 @@ export async function recognizeReceiptFromAudio(audioUri: string): Promise<Gemin
   const paymentAccountList = paymentAccountNames.length > 0 ? paymentAccountNames.join(', ') : '';
   const defaultCurrency = userCurrencies.length > 0 ? userCurrencies[0] : 'USD';
   const currencyList = userCurrencies.length > 0 ? userCurrencies.join(', ') : 'USD, CAD, CNY';
+  
+  // 获取当前日期作为参考
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split('T')[0];
 
   const prompt = `You are a financial expert. Please analyze the receipt information from this audio recording and extract:
+
+IMPORTANT - Today's date is ${todayStr}. Use this as reference for relative dates:
+- "today" = ${todayStr}
+- "yesterday" = ${yesterdayStr}
+- "last week" = 7 days before today
+- Other relative dates should be calculated based on today's date
+
 1. Supplier name (supplierName)
-2. Date (date, format: YYYY-MM-DD, use today's date if not mentioned)
+2. Date (date, format: YYYY-MM-DD, calculate based on today ${todayStr} if relative date mentioned, use today if not mentioned)
 3. Total amount (totalAmount, numeric type)
 4. Currency (currency): User's most frequently used currencies: [${currencyList}]. Use "${defaultCurrency}" as default if not mentioned
 5. Payment account (paymentAccountName, if available):

@@ -59,6 +59,9 @@ export interface ReceiptItem {
   confidence?: number; // AI识别置信度
 }
 
+// 提交方式类型
+export type InputType = 'image' | 'text' | 'audio';
+
 // 小票数据
 export interface Receipt {
   id?: string;
@@ -73,6 +76,7 @@ export interface Receipt {
   paymentAccount?: PaymentAccount; // 关联的支付账户对象
   status: ReceiptStatus;
   imageUrl?: string;
+  inputType?: InputType; // 提交方式：image（相机）、text（文字）、audio（语音）
   items: ReceiptItem[];
   createdAt?: string;
   updatedAt?: string;

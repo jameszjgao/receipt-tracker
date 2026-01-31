@@ -107,6 +107,7 @@ export async function saveReceipt(receipt: Receipt): Promise<string> {
         payment_account_id: paymentAccountId,
         status: receipt.status,
         image_url: receipt.imageUrl,
+        input_type: receipt.inputType || 'image', // 提交方式，默认为图片
         confidence: receipt.confidence,
         processed_by: receipt.processedBy,
         created_by: user.id, // 记录提交者
@@ -425,6 +426,7 @@ export async function getAllReceipts(): Promise<Receipt[]> {
       } : undefined,
       status: row.status as ReceiptStatus,
       imageUrl: row.image_url,
+      inputType: row.input_type || (row.image_url ? 'image' : 'text'),
       confidence: row.confidence,
       processedBy: row.processed_by,
       createdAt: row.created_at,
@@ -628,6 +630,7 @@ export async function getReceiptById(receiptId: string): Promise<Receipt | null>
       } : undefined,
       status: data.status as ReceiptStatus,
       imageUrl: data.image_url,
+      inputType: data.input_type || (data.image_url ? 'image' : 'text'),
       confidence: data.confidence,
       processedBy: data.processed_by,
       createdAt: data.created_at,
@@ -679,29 +682,33 @@ export async function deleteReceipt(receiptId: string): Promise<void> {
     const user = await getCurrentUser();
     if (!user) throw new Error('Not logged in');
 
-    // 先获取小票信息，以便删除关联的图片
+    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
+    const spaceId = user.currentSpaceId || user.spaceId;
+    if (!spaceId) throw new Error('No space selected');
+
+    // 先获取小票信息，以便删除关联的文件和清理孤立数据
     const receipt = await getReceiptById(receiptId);
+    if (!receipt) {
+      console.warn('Receipt not found, nothing to delete');
+      return;
+    }
 
-    // 删除关联的图片
-    if (receipt?.imageUrl) {
+    const supplierId = receipt.supplierId;
+    const paymentAccountId = receipt.paymentAccountId;
+
+    // 1. 删除关联的图片
+    if (receipt.imageUrl) {
       try {
-        // 从 imageUrl 中提取文件路径
-        // imageUrl 格式通常是：https://xxx.supabase.co/storage/v1/object/public/receipts/filename.ext
-        // 或者：https://xxx.supabase.co/storage/v1/object/sign/receipts/filename.ext?token=...
-        let filePaths: string[] = [];
-
-        // 尝试从 URL 中提取文件名
         const urlParts = receipt.imageUrl.split('/');
         const lastPart = urlParts[urlParts.length - 1];
-        // 移除查询参数（如果有）
         const fileName = lastPart.split('?')[0];
 
+        let filePaths: string[] = [];
         if (fileName && fileName.length > 0) {
           filePaths.push(fileName);
         }
 
-        // 同时尝试使用 receiptId 构建可能的文件名（作为备选）
-        // 尝试常见的图片扩展名
+        // 备选：使用 receiptId 构建可能的文件名
         const extensions = ['jpg', 'jpeg', 'png', 'webp'];
         for (const ext of extensions) {
           const testPath = `${receiptId}.${ext}`;
@@ -710,7 +717,6 @@ export async function deleteReceipt(receiptId: string): Promise<void> {
           }
         }
 
-        // 尝试删除所有可能的文件路径（remove 方法会忽略不存在的文件）
         if (filePaths.length > 0) {
           const { error: storageError } = await supabase.storage
             .from('receipts')
@@ -718,31 +724,128 @@ export async function deleteReceipt(receiptId: string): Promise<void> {
 
           if (storageError) {
             console.warn('Failed to delete image from storage:', storageError);
-            // 不抛出错误，继续删除小票记录
           } else {
             console.log('Successfully deleted image(s):', filePaths);
           }
-        } else {
-          console.warn('Could not determine file path for image deletion');
         }
       } catch (imageError) {
         console.warn('Error deleting image:', imageError);
-        // 不抛出错误，继续删除小票记录
       }
     }
 
-    // 优先使用 currentSpaceId，如果没有则使用 spaceId（向后兼容）
-    const spaceId = user.currentSpaceId || user.spaceId;
-    if (!spaceId) throw new Error('No space selected');
+    // 2. 删除关联的录音文件（从 ai_chat_logs 获取）
+    try {
+      const { data: chatLogs } = await supabase
+        .from('ai_chat_logs')
+        .select('audio_url')
+        .eq('receipt_id', receiptId)
+        .not('audio_url', 'is', null);
 
-    // 删除会级联删除商品项
+      if (chatLogs && chatLogs.length > 0) {
+        const audioFilePaths: string[] = [];
+        for (const log of chatLogs) {
+          if (log.audio_url) {
+            // 从 URL 提取文件名
+            const urlParts = log.audio_url.split('/');
+            const fileName = urlParts[urlParts.length - 1].split('?')[0];
+            if (fileName) {
+              audioFilePaths.push(fileName);
+            }
+          }
+        }
+
+        if (audioFilePaths.length > 0) {
+          const { error: audioError } = await supabase.storage
+            .from('chat-audio')
+            .remove(audioFilePaths);
+
+          if (audioError) {
+            console.warn('Failed to delete audio from storage:', audioError);
+          } else {
+            console.log('Successfully deleted audio file(s):', audioFilePaths);
+          }
+        }
+      }
+    } catch (audioError) {
+      console.warn('Error deleting audio files:', audioError);
+    }
+
+    // 3. 删除小票记录（会级联删除商品项）
     const { error } = await supabase
       .from('receipts')
       .delete()
       .eq('id', receiptId)
-                .eq('space_id', spaceId);
+      .eq('space_id', spaceId);
 
     if (error) throw error;
+
+    // 4. 清理孤立的供应商（如果未被其他小票引用）
+    if (supplierId) {
+      try {
+        const { count: supplierRefCount } = await supabase
+          .from('receipts')
+          .select('id', { count: 'exact', head: true })
+          .eq('supplier_id', supplierId);
+
+        if (supplierRefCount === 0) {
+          // 检查是否有合并记录指向该供应商
+          const { count: mergeCount } = await supabase
+            .from('supplier_merge_history')
+            .select('id', { count: 'exact', head: true })
+            .or(`source_id.eq.${supplierId},target_id.eq.${supplierId}`);
+
+          if (!mergeCount || mergeCount === 0) {
+            const { error: deleteSupplierError } = await supabase
+              .from('suppliers')
+              .delete()
+              .eq('id', supplierId);
+
+            if (deleteSupplierError) {
+              console.warn('Failed to delete orphan supplier:', deleteSupplierError);
+            } else {
+              console.log('Deleted orphan supplier:', supplierId);
+            }
+          }
+        }
+      } catch (supplierError) {
+        console.warn('Error cleaning up supplier:', supplierError);
+      }
+    }
+
+    // 5. 清理孤立的支付账户（如果未被其他小票引用）
+    if (paymentAccountId) {
+      try {
+        const { count: accountRefCount } = await supabase
+          .from('receipts')
+          .select('id', { count: 'exact', head: true })
+          .eq('payment_account_id', paymentAccountId);
+
+        if (accountRefCount === 0) {
+          // 检查是否有合并记录指向该账户
+          const { count: mergeCount } = await supabase
+            .from('payment_account_merge_history')
+            .select('id', { count: 'exact', head: true })
+            .or(`source_id.eq.${paymentAccountId},target_id.eq.${paymentAccountId}`);
+
+          if (!mergeCount || mergeCount === 0) {
+            const { error: deleteAccountError } = await supabase
+              .from('payment_accounts')
+              .delete()
+              .eq('id', paymentAccountId);
+
+            if (deleteAccountError) {
+              console.warn('Failed to delete orphan payment account:', deleteAccountError);
+            } else {
+              console.log('Deleted orphan payment account:', paymentAccountId);
+            }
+          }
+        }
+      } catch (accountError) {
+        console.warn('Error cleaning up payment account:', accountError);
+      }
+    }
+
+    console.log('Receipt deleted successfully with cleanup:', receiptId);
   } catch (error) {
     console.error('Error deleting receipt:', error);
     throw error;
