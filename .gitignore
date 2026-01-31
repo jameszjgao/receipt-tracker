@@ -11,4 +11,17 @@ npm-debug.*
 web-build/
 .env
 .env.local
+.env.development
+
+# macOS 系统文件
+.DS_Store
+**/.DS_Store
+
+# 测试文件
+test-*.js
+
+# 备份文件
+*copy*
+*.bak
+*.backup
 

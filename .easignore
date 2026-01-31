@@ -1,0 +1,32 @@
+# EAS Build 忽略文件
+# 这些文件不会上传到 EAS 构建服务器
+
+# SQL 数据库脚本
+*.sql
+
+# 开发文档
+*.md
+!README.md
+
+# 测试文件
+test-*.js
+
+# 备份文件
+*copy*
+*.bak
+*.backup
+
+# Python 脚本
+*.py
+
+# macOS 系统文件
+.DS_Store
+**/.DS_Store
+
+# 开发工具配置
+.vscode/
+.idea/
+
+# 本地环境文件
+.env.local
+.env.development
