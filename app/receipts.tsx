@@ -122,6 +122,8 @@ export default function ReceiptsScreen() {
   // 汇率缓存（用于跨币种金额折算）
   const [exchangeRates, setExchangeRates] = useState<{ [key: string]: number } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [lastReceiptId, setLastReceiptId] = useState<string | null>(null);
   const [showFabActions, setShowFabActions] = useState(false);
   const fabAnimation = useRef(new Animated.Value(0)).current;
   const router = useRouter();
@@ -220,52 +222,57 @@ export default function ReceiptsScreen() {
   // - 扫描得到的图片（已在原生层裁剪）应传入 false，避免二次裁剪截断内容
   // - 从相册选择的原始图片可以传入 true，启用自动裁剪去除背景
   const processCapturedImage = async (imageUri: string, autoCrop: boolean = true) => {
-    try {
-      setIsProcessing(true);
-      console.log('Processing captured image:', imageUri);
+    // 立即显示选单，后台处理上传
+    setShowSuccessModal(true);
+    setLastReceiptId(null); // 初始为 null，上传完成后更新
+    
+    // 后台异步处理（不阻塞 UI）
+    (async () => {
+      try {
+        console.log('Processing captured image:', imageUri);
 
-      const processedImageUri = await processImageForUpload(imageUri, {
-        autoCrop,
-        quality: 0.85,
-      });
-      console.log('Image processed:', processedImageUri);
+        const processedImageUri = await processImageForUpload(imageUri, {
+          autoCrop,
+          quality: 0.85,
+        });
+        console.log('Image processed:', processedImageUri);
 
-      const tempFileName = `temp-${Date.now()}`;
-      const imageUrl = await uploadReceiptImageTemp(processedImageUri, tempFileName);
-      console.log('Image uploaded:', imageUrl);
+        const tempFileName = `temp-${Date.now()}`;
+        const imageUrl = await uploadReceiptImageTemp(processedImageUri, tempFileName);
+        console.log('Image uploaded:', imageUrl);
 
-      const today = new Date().toISOString().split('T')[0];
-      const receiptId = await saveReceipt({
-        spaceId: '',
-        supplierName: 'Processing...',
-        totalAmount: 0,
-        date: today,
-        status: 'processing',
-        items: [],
-        imageUrl: imageUrl,
-      });
-      console.log('Receipt record created:', receiptId);
+        const today = new Date().toISOString().split('T')[0];
+        const receiptId = await saveReceipt({
+          spaceId: '',
+          supplierName: 'Processing...',
+          totalAmount: 0,
+          date: today,
+          status: 'processing',
+          items: [],
+          imageUrl: imageUrl,
+        });
+        console.log('Receipt record created:', receiptId);
 
-      setIsProcessing(false);
-      
-      // Refresh receipts list
-      await loadReceipts();
+        // 更新 receiptId，使 View Detail 可用
+        setLastReceiptId(receiptId);
+        
+        // Refresh receipts list
+        loadReceipts();
 
-      // Background processing with Gemini
-      processReceiptInBackground(imageUrl, receiptId, processedImageUri)
-        .then(() => {
-          console.log('Background processing started');
-          // Refresh again after processing
-          loadReceipts();
-        })
-        .catch(err => console.error('Background processing failed:', err));
-
-      // 不再显示成功弹框，直接后台处理
-    } catch (error) {
-      setIsProcessing(false);
-      console.error('Processing error:', error);
-      Alert.alert('Error', 'Failed to process receipt.');
-    }
+        // Background processing with Gemini (async, don't block UI)
+        processReceiptInBackground(imageUrl, receiptId, processedImageUri)
+          .then(() => {
+            console.log('Background processing started');
+            // Refresh again after processing
+            loadReceipts();
+          })
+          .catch(err => console.error('Background processing failed:', err));
+      } catch (error) {
+        console.error('Processing error:', error);
+        Alert.alert('Error', 'Failed to process receipt.');
+        setShowSuccessModal(false);
+      }
+    })();
   };
 
   const handleCameraPress = () => {
@@ -1157,22 +1164,63 @@ export default function ReceiptsScreen() {
         )}
       </View>
 
-      {/* Processing Modal */}
-      {isProcessing && (
-        <Modal
-          animationType="fade"
-          transparent={true}
-          visible={isProcessing}
-          onRequestClose={() => {}}
-        >
-          <View style={styles.processingModalOverlay}>
-            <View style={styles.processingModalContent}>
-              <ActivityIndicator size="large" color="#6C5CE7" />
-              <Text style={styles.processingModalText}>Processing receipt...</Text>
+      {/* Processing Modal - 已移除，改为静默处理 */}
+
+      {/* Success Modal - 拍摄提交后的操作选单 */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={showSuccessModal}
+        onRequestClose={() => setShowSuccessModal(false)}
+      >
+        <View style={styles.successModalOverlay}>
+          <View style={styles.successModalContent}>
+            <View style={styles.successIconContainer}>
+              <Ionicons name="checkmark-circle" size={64} color="#00B894" />
+            </View>
+            <Text style={styles.successTitle}>Submitted!</Text>
+            <Text style={styles.successSubtitle}>Receipt is being processed</Text>
+            <View style={styles.successButtons}>
+              <TouchableOpacity
+                style={styles.successButton}
+                onPress={() => {
+                  setShowSuccessModal(false);
+                  scanDocument();
+                }}
+              >
+                <Ionicons name="camera-outline" size={24} color="#6C5CE7" />
+                <Text style={styles.successButtonText}>Snap Another</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.successButton, !lastReceiptId && { opacity: 0.5 }]}
+                disabled={!lastReceiptId}
+                onPress={() => {
+                  setShowSuccessModal(false);
+                  if (lastReceiptId) {
+                    router.push(`/receipt-details/${lastReceiptId}`);
+                  }
+                }}
+              >
+                {lastReceiptId ? (
+                  <Ionicons name="eye-outline" size={24} color="#6C5CE7" />
+                ) : (
+                  <ActivityIndicator size="small" color="#6C5CE7" />
+                )}
+                <Text style={styles.successButtonText}>
+                  {lastReceiptId ? 'View Detail' : 'Uploading...'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.successButton}
+                onPress={() => setShowSuccessModal(false)}
+              >
+                <Ionicons name="checkmark-outline" size={24} color="#6C5CE7" />
+                <Text style={styles.successButtonText}>Done</Text>
+              </TouchableOpacity>
             </View>
           </View>
-        </Modal>
-      )}
+        </View>
+      </Modal>
 
       {/* 分组方式选择菜单 */}
       <Modal
@@ -2144,6 +2192,55 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#2D3436',
     fontWeight: '500',
+  },
+  successModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  successModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 400,
+  },
+  successIconContainer: {
+    marginBottom: 24,
+  },
+  successTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#2D3436',
+    marginBottom: 8,
+  },
+  successSubtitle: {
+    fontSize: 16,
+    color: '#636E72',
+    marginBottom: 32,
+  },
+  successButtons: {
+    width: '100%',
+    gap: 12,
+  },
+  successButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#6C5CE7',
+    gap: 12,
+  },
+  successButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6C5CE7',
   },
 });
 

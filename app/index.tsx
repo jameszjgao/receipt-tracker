@@ -27,6 +27,8 @@ export default function HomeScreen() {
   const [creating, setCreating] = useState(false);
   const [pendingInvitationsCount, setPendingInvitationsCount] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [lastReceiptId, setLastReceiptId] = useState<string | null>(null);
   
   // Check if running in Expo Go
   const isExpoGo = Constants.appOwnership === 'expo';
@@ -485,48 +487,54 @@ export default function HomeScreen() {
   // - 对于扫描得到的图片（已经在原生层做过裁剪），应传入 false，避免二次裁剪截断内容
   // - 对于从相册选择的原始图片，可以传入 true，启用自动裁剪去除背景
   const processCapturedImage = async (imageUri: string, autoCrop: boolean = true) => {
-    try {
-      setIsProcessing(true);
-      console.log('Processing captured image:', imageUri);
+    // 立即显示选单，后台处理上传
+    setShowSuccessModal(true);
+    setLastReceiptId(null); // 初始为 null，上传完成后更新
+    
+    // 后台异步处理（不阻塞 UI）
+    (async () => {
+      try {
+        console.log('Processing captured image:', imageUri);
 
-      // 1. Process image (compress, optional auto-crop, etc)
-      const processedImageUri = await processImageForUpload(imageUri, {
-        autoCrop,
-        quality: 0.85,
-      });
-      console.log('Image processed:', processedImageUri);
+        // 1. Process image (compress, optional auto-crop, etc)
+        const processedImageUri = await processImageForUpload(imageUri, {
+          autoCrop,
+          quality: 0.85,
+        });
+        console.log('Image processed:', processedImageUri);
 
-      // 2. Upload to Supabase Storage (temp)
-      const tempFileName = `temp-${Date.now()}`;
-      const imageUrl = await uploadReceiptImageTemp(processedImageUri, tempFileName);
-      console.log('Image uploaded:', imageUrl);
+        // 2. Upload to Supabase Storage (temp)
+        const tempFileName = `temp-${Date.now()}`;
+        const imageUrl = await uploadReceiptImageTemp(processedImageUri, tempFileName);
+        console.log('Image uploaded:', imageUrl);
 
-      // 3. Create receipt record
-      const today = new Date().toISOString().split('T')[0];
-      const receiptId = await saveReceipt({
-        spaceId: '', // Will be auto-filled
-        supplierName: 'Processing...',
-        totalAmount: 0,
-        date: today,
-        status: 'processing',
-        items: [],
-        imageUrl: imageUrl,
-      });
-      console.log('Receipt record created:', receiptId);
+        // 3. Create receipt record
+        const today = new Date().toISOString().split('T')[0];
+        const receiptId = await saveReceipt({
+          spaceId: '', // Will be auto-filled
+          supplierName: 'Processing...',
+          totalAmount: 0,
+          date: today,
+          status: 'processing',
+          items: [],
+          imageUrl: imageUrl,
+        });
+        console.log('Receipt record created:', receiptId);
 
-      setIsProcessing(false);
-      // 简化交互：不再弹出提示，直接后台处理
+        // 更新 receiptId，使 View Detail 可用
+        setLastReceiptId(receiptId);
 
-      // 4. Background processing with Gemini
-      processReceiptInBackground(imageUrl, receiptId, processedImageUri)
-        .then(() => console.log('Background processing started'))
-        .catch(err => console.error('Background processing failed:', err));
+        // 4. Background processing with Gemini (async, don't block UI)
+        processReceiptInBackground(imageUrl, receiptId, processedImageUri)
+          .then(() => console.log('Background processing started'))
+          .catch(err => console.error('Background processing failed:', err));
 
-    } catch (error) {
-      setIsProcessing(false);
-      console.error('Processing error:', error);
-      Alert.alert('Error', 'Failed to process receipt.');
-    }
+      } catch (error) {
+        console.error('Processing error:', error);
+        Alert.alert('Error', 'Failed to process receipt.');
+        setShowSuccessModal(false);
+      }
+    })();
   };
 
   const handleCameraPress = () => {
@@ -691,21 +699,66 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Processing Modal */}
+      {/* Processing Modal - 已移除，改为静默处理 */}
+
+      {/* Success Modal - 拍摄提交后的操作选单 */}
       <Modal
         animationType="fade"
         transparent={true}
-        visible={isProcessing}
-        onRequestClose={() => {}}
+        visible={showSuccessModal}
+        onRequestClose={() => setShowSuccessModal(false)}
       >
-        <View style={styles.processingModalOverlay}>
-          <View style={styles.processingModalContent}>
-            <ActivityIndicator size="large" color="#6C5CE7" />
-            <Text style={styles.processingModalText}>Processing receipt...</Text>
+        <View style={styles.successModalOverlay}>
+          <View style={styles.successModalContent}>
+            <View style={styles.successIconContainer}>
+              <Ionicons name="checkmark-circle" size={64} color="#00B894" />
+            </View>
+            <Text style={styles.successTitle}>Submitted!</Text>
+            <Text style={styles.successSubtitle}>Receipt is being processed</Text>
+            <View style={styles.successButtons}>
+              <TouchableOpacity
+                style={styles.successButton}
+                onPress={() => {
+                  setShowSuccessModal(false);
+                  scanDocument();
+                }}
+              >
+                <Ionicons name="camera-outline" size={24} color="#6C5CE7" />
+                <Text style={styles.successButtonText}>Snap Another</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.successButton, !lastReceiptId && { opacity: 0.5 }]}
+                disabled={!lastReceiptId}
+                onPress={() => {
+                  setShowSuccessModal(false);
+                  if (lastReceiptId) {
+                    router.push(`/receipt-details/${lastReceiptId}`);
+                  }
+                }}
+              >
+                {lastReceiptId ? (
+                  <Ionicons name="eye-outline" size={24} color="#6C5CE7" />
+                ) : (
+                  <ActivityIndicator size="small" color="#6C5CE7" />
+                )}
+                <Text style={styles.successButtonText}>
+                  {lastReceiptId ? 'View Detail' : 'Uploading...'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.successButton}
+                onPress={() => {
+                  setShowSuccessModal(false);
+                  router.push('/receipts');
+                }}
+              >
+                <Ionicons name="list-outline" size={24} color="#6C5CE7" />
+                <Text style={styles.successButtonText}>View List</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
-
 
       {/* Create Space Modal */}
       <Modal
